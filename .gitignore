@@ -3,3 +3,9 @@ node_modules/
 dist/
 .next/
 build/
+
+*.key
+*.pem
+*.pfx
+*.crt
+*.p12
