@@ -1,0 +1,246 @@
+/* =========================================================
+   Toolkit Core — shared UI primitives
+   Cards / Buttons / Inputs / Lists / Chips / Layout helpers
+   ========================================================= */
+
+/* Layout helpers used in JSX */
+.row{
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.grid2{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 980px){
+  .grid2{ grid-template-columns: 1fr; }
+}
+
+/* Reusable “panel” (sênior: evita duplicação) */
+.panel{
+  width: 100%;
+  border-radius: var(--radius-xl);
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03));
+  border: 1px solid var(--stroke-1);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  padding: 16px;
+}
+
+
+
+.card{
+  width: 100%;
+  border-radius: var(--radius-xl);
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03));
+  border: 1px solid var(--stroke-1);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  padding: 16px;
+}
+
+
+
+.cardInner{
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, var(--bg-2), var(--bg-3));
+  border: 1px solid var(--stroke-2);
+  box-shadow: var(--shadow-1);
+  padding: 14px;
+}
+
+.divider{
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.10), transparent);
+  margin: 14px 0;
+}
+
+.sectionTitle{
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.78);
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+/* Buttons */
+.btn{
+  appearance: none;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.90);
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: transform 120ms ease, background 160ms ease, border-color 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.28);
+}
+.btn:hover{
+  transform: translateY(-1px);
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.16);
+}
+.btn:active{
+  transform: translateY(0);
+  background: rgba(255,255,255,0.07);
+}
+.btn:focus-visible{
+  outline: none;
+  box-shadow: var(--shadow-1), var(--ring);
+  border-color: rgba(45, 212, 191, 0.35);
+}
+.btn[disabled]{
+  opacity: 0.50;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+.btn.primary{
+  border: 1px solid rgba(45,212,191,0.28);
+  background:
+    linear-gradient(180deg, rgba(45,212,191,0.22), rgba(59,130,246,0.16)),
+    rgba(255,255,255,0.06);
+}
+.btn.primary:hover{
+  border-color: rgba(45,212,191,0.40);
+  background:
+    linear-gradient(180deg, rgba(45,212,191,0.28), rgba(59,130,246,0.20)),
+    rgba(255,255,255,0.07);
+}
+.btn.primary:focus-visible{
+  border-color: rgba(45,212,191,0.55);
+  box-shadow: 0 14px 40px rgba(0,0,0,0.38), 0 0 0 3px rgba(59,130,246,0.18);
+}
+
+/* Inputs */
+.input{
+  width: 100%;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(0,0,0,0.18);
+  color: rgba(255,255,255,0.92);
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+.input::placeholder{ color: rgba(255,255,255,0.40); }
+.input:focus{
+  border-color: rgba(45,212,191,0.45);
+  box-shadow: var(--ring);
+  background: rgba(0,0,0,0.22);
+}
+
+/* Lists */
+.list{
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+.listRow{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.045);
+  border: 1px solid rgba(255,255,255,0.08);
+  transition: border-color 160ms ease, background 160ms ease, transform 120ms ease;
+}
+.listRow:hover{
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.12);
+  transform: translateY(-1px);
+}
+.listMain{ min-width: 0; }
+.listTitle{
+  font-weight: 700;
+  color: rgba(255,255,255,0.92);
+  font-size: 13px;
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 520px;
+}
+.pill{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: rgba(255,255,255,0.85);
+  background: rgba(59,130,246,0.12);
+  border: 1px solid rgba(59,130,246,0.22);
+}
+
+/* Chips */
+.chips{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+.chip{
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(45,212,191,0.14), rgba(59,130,246,0.10));
+  border: 1px solid rgba(45,212,191,0.18);
+  box-shadow: 0 10px 26px rgba(0,0,0,0.25);
+  max-width: 100%;
+}
+.chip strong{
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.92);
+}
+
+/* Actions */
+.actionGrid{
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+.actionCard{
+  border-radius: var(--radius-lg);
+  background: rgba(255,255,255,0.045);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 14px;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.30);
+}
+.actionTitle{
+  font-weight: 800;
+  font-size: 14px;
+  color: rgba(255,255,255,0.92);
+  margin-bottom: 2px;
+}
+
+/* Alerts (optional hooks) */
+.alert{
+  border-radius: 14px;
+  padding: 12px 12px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.05);
+}
+.alert--warn{
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+}
+.alert--err{
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.08);
+}
+

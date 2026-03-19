@@ -1,0 +1,80 @@
+/* =========================================================
+   X.Digital Atlas UI — Theme (Dark / Glass)
+   Only: tokens + base page styles + tiny utilities
+   ========================================================= */
+
+:root{
+  /* Brand-ish palette (Atlas-like) */
+  --bg-0: #060B1A;        /* page */
+  --bg-1: #070F24;        /* deep */
+  --bg-2: rgba(15, 23, 42, 0.72);  /* glass */
+  --bg-3: rgba(15, 23, 42, 0.52);  /* lighter glass */
+
+  --stroke-1: rgba(255,255,255,0.10);
+  --stroke-2: rgba(255,255,255,0.06);
+
+  --text-1: rgba(255,255,255,0.92);
+  --text-2: rgba(255,255,255,0.74);
+  --text-3: rgba(255,255,255,0.56);
+
+  --brand-1: #14B8A6; /* teal */
+  --brand-2: #2DD4BF; /* teal bright */
+  --brand-3: #3B82F6; /* blue */
+  --brand-4: #60A5FA; /* blue bright */
+
+  --warn: #F59E0B;
+  --err: #EF4444;
+  --ok: #22C55E;
+
+  --shadow-1: 0 10px 30px rgba(0,0,0,0.40);
+  --shadow-2: 0 18px 55px rgba(0,0,0,0.45);
+
+  --radius-xl: 18px;
+  --radius-lg: 14px;
+  --radius-md: 12px;
+  --radius-sm: 10px;
+
+  --ring: 0 0 0 3px rgba(45, 212, 191, 0.20);
+
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+          Arial, "Noto Sans", "Liberation Sans", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+
+body{
+  margin: 0;
+  font-family: var(--font);
+  color: var(--text-1);
+  background:
+    radial-gradient(1200px 700px at 20% 10%, rgba(59, 130, 246, 0.16) 0%, transparent 55%),
+    radial-gradient(1000px 600px at 65% 22%, rgba(45, 212, 191, 0.14) 0%, transparent 60%),
+    radial-gradient(900px 600px at 55% 85%, rgba(20, 184, 166, 0.10) 0%, transparent 55%),
+    linear-gradient(180deg, var(--bg-0), var(--bg-1));
+}
+
+/* Small utilities used across the app */
+.small{ color: var(--text-2); font-size: 12px; line-height: 1.35; }
+.small.muted, .muted{ color: var(--text-3); }
+
+/* Code pill */
+code{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  color: rgba(255,255,255,0.84);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 2px 6px;
+  border-radius: 8px;
+}
+
+/* Nice scrollbars (Chrome/Edge) */
+*::-webkit-scrollbar{ width: 10px; height: 10px; }
+*::-webkit-scrollbar-track{ background: rgba(255,255,255,0.04); border-radius: 999px; }
+*::-webkit-scrollbar-thumb{
+  background: rgba(255,255,255,0.14);
+  border-radius: 999px;
+  border: 2px solid rgba(0,0,0,0.25);
+}
+*::-webkit-scrollbar-thumb:hover{ background: rgba(255,255,255,0.18); }
