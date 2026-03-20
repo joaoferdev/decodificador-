@@ -231,11 +231,16 @@ export function normalizeInputs(files: InputFile[]): ParsedObject[] {
     }
 
     if (encoding === "der") {
+      const lowerName = f.originalName.toLowerCase();
+      const looksLikePkcs12 = lowerName.endsWith(".pfx") || lowerName.endsWith(".p12");
+
       out.push({
         inputId: f.id,
-        detectedType: "pkcs12",
+        detectedType: looksLikePkcs12 ? "pkcs12" : "unknown",
         encoding: "der",
-        note: "DER tratado como PFX no MVP"
+        note: looksLikePkcs12
+          ? "PKCS#12 binario identificado pela extensao do arquivo"
+          : "Arquivo DER binario sem tipo reconhecido"
       });
       continue;
     }

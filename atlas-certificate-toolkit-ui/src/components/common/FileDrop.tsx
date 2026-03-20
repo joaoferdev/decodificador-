@@ -9,10 +9,10 @@ export function FileDrop(props: {
   const ref = useRef<HTMLInputElement | null>(null);
 
   return (
-    <div className="card" style={{ padding: 14 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+    <div className="card" style={{ padding: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
         <div>
-          <strong>{props.label}</strong>
+          <strong style={{ display: "block", fontSize: 15 }}>{props.label}</strong>
           <div className="small">Arraste e solte ou selecione arquivo(s)</div>
         </div>
         <button className="btn" onClick={() => ref.current?.click()}>
@@ -35,12 +35,14 @@ export function FileDrop(props: {
 
       <div
         style={{
-          marginTop: 10,
-          border: "1px dashed rgba(255,255,255,0.18)",
-          borderRadius: 12,
-          padding: 14,
+          marginTop: 14,
+          border: "1px dashed rgba(111, 194, 247, 0.3)",
+          borderRadius: 20,
+          padding: 22,
           textAlign: "center",
-          color: "rgba(255,255,255,0.75)",
+          color: "rgba(235, 245, 255, 0.82)",
+          background:
+            "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)), linear-gradient(135deg, rgba(52,180,242,0.06), transparent 45%)",
         }}
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
@@ -49,7 +51,8 @@ export function FileDrop(props: {
           if (files.length) props.onFiles(files);
         }}
       >
-        Solte aqui
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>Solte aqui</div>
+        <div className="small">Arquivos PEM, CRT, KEY, PFX ou CSR</div>
       </div>
     </div>
   );

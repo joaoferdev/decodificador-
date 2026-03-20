@@ -8,6 +8,23 @@ const OID_KEY_BAG = "1.2.840.113549.1.12.10.1.1";
 const OID_PKCS8_SHROUDED_KEY_BAG = "1.2.840.113549.1.12.10.1.2";
 const OID_CERT_BAG = "1.2.840.113549.1.12.10.1.3";
 
+function parsePkcs12OrThrow(bytes: Buffer, password: string) {
+  try {
+    const pfxDer = forge.util.createBuffer(bytes.toString("binary"));
+    const asn1 = forge.asn1.fromDer(pfxDer);
+    return forge.pkcs12.pkcs12FromAsn1(asn1, password);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const normalized = message.toLowerCase();
+
+    if (normalized.includes("invalid password") || normalized.includes("mac could not be verified")) {
+      throw new ToolkitException("PASSWORD_INVALID", "Senha do PFX/P12 invalida.", 400);
+    }
+
+    throw new ToolkitException("PKCS12_INVALID", "O arquivo enviado nao e um PFX/P12 valido.", 400);
+  }
+}
+
 export function recipeExtractPkcs12(
   files: InputFile[],
   parsed: ParsedObject[],
@@ -27,10 +44,7 @@ export function recipeExtractPkcs12(
     throw new ToolkitException("INPUT_NOT_FOUND", "Arquivo PFX não encontrado.");
   }
 
-  
-  const pfxDer = forge.util.createBuffer(pfxFile.bytes.toString("binary"));
-  const asn1 = forge.asn1.fromDer(pfxDer);
-  const p12 = forge.pkcs12.pkcs12FromAsn1(asn1, params.password);
+  const p12 = parsePkcs12OrThrow(pfxFile.bytes, params.password);
 
   
   const bagsPkcs8 = p12.getBags({ bagType: OID_PKCS8_SHROUDED_KEY_BAG }) as any;
@@ -50,6 +64,10 @@ export function recipeExtractPkcs12(
   const bagsCert = p12.getBags({ bagType: OID_CERT_BAG }) as any;
   const certBags = (bagsCert?.[OID_CERT_BAG] ?? []) as any[];
 
+  if (certBags.length === 0) {
+    throw new ToolkitException("PFX_NO_CERT", "O PFX/P12 nao contem certificado utilizavel.", 400);
+  }
+
   const certPems = certBags.map((b) => forge.pki.certificateToPem(b.cert)).join("\n") + "\n";
   const certBytes = Buffer.from(certPems, "utf8");
 
@@ -58,6 +76,7 @@ export function recipeExtractPkcs12(
       id: randomId("artifact"),
       filename: "private.key.pem",
       mimeType: "application/x-pem-file",
+      size: keyBytes.length,
       sha256: sha256Hex(keyBytes),
       bytes: keyBytes
     },
@@ -65,6 +84,7 @@ export function recipeExtractPkcs12(
       id: randomId("artifact"),
       filename: "certificates.pem",
       mimeType: "application/x-pem-file",
+      size: certBytes.length,
       sha256: sha256Hex(certBytes),
       bytes: certBytes
     }

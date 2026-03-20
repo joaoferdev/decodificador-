@@ -16,7 +16,6 @@ export function detectEncoding(bytes: Buffer): Encoding {
 
 export function detectType(bytes: Buffer, encoding: Encoding): DetectedType {
   if (encoding !== "pem") {
-    if (encoding === "der") return "pkcs12";
     return "unknown";
   }
 

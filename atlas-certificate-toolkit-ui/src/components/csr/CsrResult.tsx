@@ -1,11 +1,24 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { DecodedCsr, Warning } from "../../api/toolkit";
 
-function safeStr(v: any) {
+type UnknownRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): UnknownRecord {
+  return value !== null && typeof value === "object" ? (value as UnknownRecord) : {};
+}
+
+function safeStr(v: unknown) {
   if (v === null || v === undefined) return "—";
   if (Array.isArray(v)) return v.filter(Boolean).join(", ");
   if (typeof v === "object") return JSON.stringify(v);
   return String(v);
+}
+
+function formatDistinguishedName(value: string): string[] {
+  return value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
 }
 
 function copyToClipboard(text: string) {
@@ -16,7 +29,7 @@ function copyToClipboard(text: string) {
   }
 }
 
-function Section(props: { title: string; subtitle?: string; children: React.ReactNode }) {
+function Section(props: { title: string; subtitle?: string; children: ReactNode }) {
   return (
     <div className="csrSection">
       <div className="csrSectionHeader">
@@ -30,11 +43,12 @@ function Section(props: { title: string; subtitle?: string; children: React.Reac
 
 function KVRow(props: {
   label: string;
-  value: React.ReactNode;
-  actions?: React.ReactNode;
+  value: ReactNode;
+  actions?: ReactNode;
+  className?: string;
 }) {
   return (
-    <div className="csrKVRow">
+    <div className={`csrKVRow${props.className ? ` ${props.className}` : ""}`}>
       <div className="csrKVLabel">{props.label}</div>
       <div className="csrKVValue">{props.value}</div>
       <div className="csrKVActions">{props.actions}</div>
@@ -56,93 +70,41 @@ function Pills(props: { items: string[] }) {
 }
 
 export function CsrResult(props: { decoded: DecodedCsr; warnings: Warning[] }) {
-  const d = props.decoded as any;
+  const d = props.decoded;
+  const subjectObj = asRecord(d.subject);
+  const sigRecord = asRecord(d.signature);
+  const pubKeyRecord = asRecord(d.publicKey);
+  const fingerprints = asRecord(d.fingerprints);
 
-  // ======= Tentativas de leitura (bem tolerante) =======
-  const subjectObj = d.subject ?? d.subjectRdn ?? d.identification?.subject ?? d.decoded?.subject ?? {};
-  const fullSubject =
-    d.fullSubject ??
-    d.subjectString ??
-    d.subject?.full ??
-    d.identification?.fullSubject ??
-    d.identification?.subjectString ??
-    "";
+  const fullSubject = d.subjectString ?? "";
+  const cn = subjectObj.commonName ?? subjectObj.CN ?? "";
+  const o = subjectObj.organization ?? subjectObj.O ?? "";
+  const ou = subjectObj.organizationalUnit ?? subjectObj.OU ?? "";
+  const l = subjectObj.locality ?? subjectObj.L ?? "";
+  const st = subjectObj.state ?? subjectObj.ST ?? "";
+  const c = subjectObj.country ?? subjectObj.C ?? "";
+  const email = subjectObj.email ?? subjectObj.E ?? "";
 
-  const cn =
-    subjectObj.commonName ??
-    subjectObj.CN ??
-    d.cn ??
-    d.commonName ??
-    d.subject?.CN ??
-    "";
-
-  const o = subjectObj.organization ?? subjectObj.O ?? d.organization ?? d.subject?.O ?? "";
-  const ou =
-    subjectObj.organizationalUnit ?? subjectObj.OU ?? d.organizationalUnit ?? d.subject?.OU ?? "";
-  const l = subjectObj.locality ?? subjectObj.L ?? d.locality ?? d.subject?.L ?? "";
-  const st = subjectObj.state ?? subjectObj.ST ?? d.state ?? d.subject?.ST ?? "";
-  const c = subjectObj.country ?? subjectObj.C ?? d.country ?? d.subject?.C ?? "";
-  const email = subjectObj.email ?? subjectObj.E ?? d.email ?? d.subject?.E ?? "";
-
-  const sigAlg =
-    d.signatureAlgorithm ??
-    d.signatureAlg ??
-    d.signature?.algorithm ??
-    d.signature?.alg ??
-    "";
-
-  const keyBits =
-    d.keyBits ??
-    d.publicKeyBits ??
-    d.key?.bits ??
-    d.publicKey?.bits ??
-    d.publicKeyInfo?.bits ??
-    "";
-
-  const keyType =
-    d.keyType ??
-    d.publicKeyType ??
-    d.key?.type ??
-    d.publicKey?.type ??
-    d.publicKeyInfo?.type ??
-    "";
+  const sigAlg = sigRecord.algorithm ?? "";
+  const keyBits = pubKeyRecord.bits ?? "";
+  const keyType = pubKeyRecord.algorithm ?? "";
 
   const sanDns: string[] = useMemo(() => {
-    const ext = d.extensions ?? {};
-    const san =
-      ext.subjectAltName ??
-      ext.san ??
-      d.san ??
-      d.subjectAltName ??
-      d.altNames ??
-      {};
-
-    const dns =
-      san.dns ??
-      san.DNS ??
-      san.dnsNames ??
-      san.dns_names ??
-      san.names ??
-      [];
+    const ext = asRecord(d.extensions);
+    const san = asRecord(ext.subjectAltName);
+    const dns = san.dns ?? san.DNS ?? san.dnsNames ?? san.dns_names ?? san.names ?? [];
 
     if (Array.isArray(dns)) return dns.map(String).filter(Boolean);
     if (typeof dns === "string") return [dns];
     return [];
-  }, [d]);
+  }, [d.extensions]);
 
-  const fpSha1 =
-    d.fingerprints?.sha1 ??
-    d.fingerprint?.sha1 ??
-    d.sha1 ??
-    d.hashes?.sha1 ??
-    "";
-
-  const fpSha256 =
-    d.fingerprints?.sha256 ??
-    d.fingerprint?.sha256 ??
-    d.sha256 ??
-    d.hashes?.sha256 ??
-    "";
+  const fpSha1 = fingerprints.sha1 ?? "";
+  const fpSha256 = fingerprints.sha256 ?? "";
+  const formattedSubject = useMemo(
+    () => (fullSubject ? formatDistinguishedName(String(fullSubject)) : []),
+    [fullSubject]
+  );
 
   const [showFullSubject, setShowFullSubject] = useState(false);
   const [showSha1, setShowSha1] = useState(false);
@@ -150,7 +112,6 @@ export function CsrResult(props: { decoded: DecodedCsr; warnings: Warning[] }) {
 
   return (
     <div className="csrResultPro">
-      {/* Top summary pills */}
       <div className="csrTopPills">
         <span className="csrTopPill">
           <span className="k">Assinatura</span>
@@ -183,26 +144,31 @@ export function CsrResult(props: { decoded: DecodedCsr; warnings: Warning[] }) {
         />
       </Section>
 
-      <Section title="Identificação" subtitle="Subject">
-        <KVRow label="Organização (O)" value={<span className="csrMono">{safeStr(o)}</span>} />
+      <Section title="Identificacao" subtitle="Subject">
+        <KVRow label="Organizacao (O)" value={<span className="csrMono">{safeStr(o)}</span>} />
         <KVRow label="Unidade (OU)" value={<span className="csrMono">{safeStr(ou)}</span>} />
         <KVRow label="Cidade (L)" value={<span className="csrMono">{safeStr(l)}</span>} />
         <KVRow label="Estado (ST)" value={<span className="csrMono">{safeStr(st)}</span>} />
-        <KVRow label="País (C)" value={<span className="csrMono">{safeStr(c)}</span>} />
+        <KVRow label="Pais (C)" value={<span className="csrMono">{safeStr(c)}</span>} />
         <KVRow label="E-mail (E)" value={<span className="csrMono">{safeStr(email)}</span>} />
 
         <div className="csrDividerSoft" />
 
         <KVRow
           label="Subject completo"
+          className="csrKVRowExpanded"
           value={
-            <span className="csrMono">
+            <div className="csrSubjectBlock">
               {fullSubject
                 ? showFullSubject
-                  ? safeStr(fullSubject)
-                  : `${String(fullSubject).slice(0, 80)}${String(fullSubject).length > 80 ? "…" : ""}`
+                  ? formattedSubject.map((part, index) => (
+                      <div className="csrSubjectLine csrMono" key={`${part}-${index}`}>
+                        {part}
+                      </div>
+                    ))
+                  : `${String(fullSubject).slice(0, 80)}${String(fullSubject).length > 80 ? "..." : ""}`
                 : "—"}
-            </span>
+            </div>
           }
           actions={
             fullSubject ? (
@@ -219,7 +185,7 @@ export function CsrResult(props: { decoded: DecodedCsr; warnings: Warning[] }) {
         />
       </Section>
 
-      <Section title="Impressões digitais" subtitle="Fingerprints">
+      <Section title="Impressoes digitais" subtitle="Fingerprints">
         <KVRow
           label="SHA-1"
           value={
@@ -227,7 +193,7 @@ export function CsrResult(props: { decoded: DecodedCsr; warnings: Warning[] }) {
               {fpSha1
                 ? showSha1
                   ? safeStr(fpSha1)
-                  : `${String(fpSha1).slice(0, 22)}…${String(fpSha1).slice(-10)}`
+                  : `${String(fpSha1).slice(0, 22)}...${String(fpSha1).slice(-10)}`
                 : "—"}
             </span>
           }
@@ -252,7 +218,7 @@ export function CsrResult(props: { decoded: DecodedCsr; warnings: Warning[] }) {
               {fpSha256
                 ? showSha256
                   ? safeStr(fpSha256)
-                  : `${String(fpSha256).slice(0, 22)}…${String(fpSha256).slice(-10)}`
+                  : `${String(fpSha256).slice(0, 22)}...${String(fpSha256).slice(-10)}`
                 : "—"}
             </span>
           }
@@ -271,7 +237,7 @@ export function CsrResult(props: { decoded: DecodedCsr; warnings: Warning[] }) {
         />
       </Section>
 
-      <Section title="Extensões" subtitle="Extensions">
+      <Section title="Extensoes" subtitle="Extensions">
         <KVRow
           label="SAN (DNS)"
           value={<Pills items={sanDns} />}
@@ -285,7 +251,7 @@ export function CsrResult(props: { decoded: DecodedCsr; warnings: Warning[] }) {
         />
       </Section>
 
-      {props.warnings?.length ? (
+      {props.warnings.length ? (
         <Section title="Avisos" subtitle="Warnings">
           <div className="csrWarnings">
             {props.warnings.map((w, i) => (

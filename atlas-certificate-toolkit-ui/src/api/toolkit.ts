@@ -1,6 +1,13 @@
 import { apiFetch } from "./client";
 
 export type Warning = { code: string; message: string };
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
 
 export type DecodedCsr = {
   inputId: string;
@@ -17,6 +24,11 @@ export type DecodedCsr = {
   };
   fingerprints: { sha1: string; sha256: string };
   warnings?: Warning[];
+};
+
+export type JobAnalysis = {
+  warnings?: Warning[];
+  decodedCsr?: DecodedCsr;
 };
 
 export async function decodeCsrFromPem(pem: string) {
@@ -60,10 +72,15 @@ export type JobPublic = {
   inputs: { id: string; originalName: string; size: number; sha256: string; mimeType: string }[];
   parsed?: ParsedItem[];
   artifacts?: ArtifactPublic[];
-  analysis?: any;
+  analysis?: JobAnalysis;
 };
 
 export type JobCreated = { jobId: string };
+export type RunRecipeResponse = {
+  artifacts?: ArtifactPublic[];
+  decoded?: DecodedCsr;
+  analysis?: JobAnalysis | null;
+};
 
 export async function createJob(files: File[]) {
   const fd = new FormData();
@@ -75,9 +92,8 @@ export async function getJob(jobId: string) {
   return apiFetch<JobPublic>(`/toolkit/jobs/${jobId}`);
 }
 
-export async function runRecipe(jobId: string, recipe: string, body?: any) {
-  
-  return apiFetch<any>(`/toolkit/jobs/${jobId}/recipes/${recipe}`, {
+export async function runRecipe(jobId: string, recipe: string, body?: Record<string, unknown>) {
+  return apiFetch<RunRecipeResponse>(`/toolkit/jobs/${jobId}/recipes/${recipe}`, {
     method: "POST",
     headers: { "Content-Type": "application/json; charset=utf-8" },
     body: JSON.stringify(body ?? {}),
@@ -85,7 +101,6 @@ export async function runRecipe(jobId: string, recipe: string, body?: any) {
 }
 
 export function downloadArtifact(jobId: string, artifactId: string) {
-  
   const base = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
   const url = `${base}/toolkit/jobs/${jobId}/download/${artifactId}`;
   window.open(url, "_blank", "noopener,noreferrer");

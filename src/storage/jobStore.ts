@@ -1,4 +1,4 @@
-import type { InputFile, ParsedObject, Artifact, JobPublic } from "../domain/types.js";
+import type { InputFile, ParsedObject, Artifact, JobAnalysis, JobPublic } from "../domain/types.js";
 import { randomId } from "../utils/crypto.js";
 
 type InternalJob = {
@@ -44,7 +44,7 @@ export function setParsed(jobId: string, parsed: ParsedObject[]): void {
 }
 
 
-export function setAnalysis(jobId: string, analysis: any): void {
+export function setAnalysis(jobId: string, analysis: JobAnalysis): void {
   const internal = getJob(jobId);
   if (!internal) return;
 

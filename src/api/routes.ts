@@ -19,6 +19,7 @@ import { normalizeInputs } from "../services/normalizer.js";
 import { analyze } from "../services/analyzer.js";
 
 import { recipeBuildBundle } from "../recipes/buildBundle.js";
+import { recipeExportFormats } from "../recipes/exportFormats.js";
 import { recipeExtractPkcs12 } from "../recipes/extractPkcs12.js";
 import { recipeGeneratePkcs12 } from "../recipes/generatePkcs12.js";
 import { recipeDecodeCsr } from "../recipes/decodeCsr.js";
@@ -163,6 +164,17 @@ routes.post("/toolkit/jobs/:jobId/recipes/:recipe", (req, res) => {
       return res.json({ artifacts: getJob(jobId)?.job.artifacts ?? [] });
     }
 
+    if (recipe === "export_formats") {
+      const { formats, sourcePassword, outputPassword } = req.body ?? {};
+      const arts = recipeExportFormats(internal.files, internal.job.parsed, {
+        formats: Array.isArray(formats) ? formats : [],
+        sourcePassword,
+        outputPassword
+      });
+      addArtifacts(jobId, arts);
+      return res.json({ artifacts: getJob(jobId)?.job.artifacts ?? [] });
+    }
+
     if (recipe === "decode_csr") {
       const decoded = recipeDecodeCsr(internal.files, internal.job.parsed);
 
@@ -178,7 +190,7 @@ routes.post("/toolkit/jobs/:jobId/recipes/:recipe", (req, res) => {
 
     return res
       .status(400)
-      .json({ error: "Recipe inválida. Use build_bundle | extract_pkcs12 | generate_pkcs12 | decode_csr" });
+      .json({ error: "Recipe inválida. Use build_bundle | extract_pkcs12 | generate_pkcs12 | export_formats | decode_csr" });
   } catch (e: any) {
     if (e instanceof ToolkitException) {
       return res.status(e.httpStatus).json({ error: e.code, message: e.message });

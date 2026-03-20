@@ -33,8 +33,36 @@ export type ParsedObject = {
   note?: string;
   fingerprintSha1?: string;
   fingerprintSha256?: string;
-  publicKeyBits?: number 
-  publicKeyType?: "RSA" | "EC" | "UNKNOWN"
+  publicKeyBits?: number;
+  publicKeyType?: "RSA" | "EC" | "UNKNOWN";
+};
+
+export type WarningItem = {
+  code: string;
+  message: string;
+};
+
+export type DecodedCsrAnalysis = {
+  inputId: string;
+  type: "csr";
+  subjectString: string;
+  subject: Record<string, string | string[]>;
+  publicKey: { algorithm: "RSA" | "EC" | "UNKNOWN"; bits?: number; exponent?: number };
+  signature: { valid: boolean; algorithm?: string; oid?: string };
+  extensions: {
+    subjectAltName: { dns: string[]; ip: string[]; email: string[]; uri: string[] };
+    keyUsage: string[];
+    extendedKeyUsage: string[];
+    basicConstraints: { ca?: boolean; pathLenConstraint?: number };
+    raw?: unknown[];
+  };
+  fingerprints: { sha1: string; sha256: string };
+  warnings: WarningItem[];
+};
+
+export type JobAnalysis = {
+  warnings?: WarningItem[];
+  decodedCsr?: DecodedCsrAnalysis;
 };
 
 export type Job = {
@@ -43,13 +71,14 @@ export type Job = {
   status: "created" | "parsed" | "expired";
   inputs: Omit<InputFile, "bytes">[];
   parsed: ParsedObject[];
-  analysis?: any;
+  analysis?: JobAnalysis;
 };
 
 export type Artifact = {
   id: string;
   filename: string;
   mimeType: string;
+  size: number;
   sha256: string;
   bytes: Buffer;
 };
@@ -60,6 +89,6 @@ export type JobPublic = {
   status: "created" | "parsed" | "expired";
   inputs: Omit<InputFile, "bytes">[];
   parsed: ParsedObject[];
-  analysis?: any;
+  analysis?: JobAnalysis;
   artifacts: Omit<Artifact, "bytes">[];
 };

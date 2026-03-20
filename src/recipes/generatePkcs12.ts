@@ -104,6 +104,7 @@ export function recipeGeneratePkcs12(
     id: randomId("artifact"),
     filename: "certificate.pfx",
     mimeType: "application/x-pkcs12",
+    size: bytes.length,
     sha256: sha256Hex(bytes),
     bytes
   };

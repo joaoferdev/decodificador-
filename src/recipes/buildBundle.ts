@@ -24,6 +24,7 @@ export function recipeBuildBundle(files: InputFile[], parsed: ParsedObject[]): A
     id: randomId("artifact"),
     filename: "chain.pem",
     mimeType: "application/x-pem-file",
+    size: bytes.length,
     sha256: sha256Hex(bytes),
     bytes
   };
