@@ -1,67 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
-import type { JobPublic, ParsedItem, Warning } from "../../api/toolkit";
+import type { JobPublic, Warning } from "../../api/toolkit";
 import { downloadArtifact, getJob, runRecipe } from "../../api/toolkit";
 import { Alert } from "../common/Alert";
-
-function bytes(n: number) {
-  if (!Number.isFinite(n)) return "—";
-  const units = ["B", "KB", "MB", "GB"];
-  let x = n;
-  let u = 0;
-  while (x >= 1024 && u < units.length - 1) {
-    x /= 1024;
-    u++;
-  }
-  return `${x.toFixed(u === 0 ? 0 : 1)} ${units[u]}`;
-}
-
-function hasType(job: JobPublic | null, t: string) {
-  const want = String(t).trim().toLowerCase();
-  return (job?.parsed ?? []).some((p) => String(p.detectedType).trim().toLowerCase() === want);
-}
-
-function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
-}
-
-type ConversionKey =
-  | "export_pem"
-  | "export_crt"
-  | "export_der"
-  | "export_key"
-  | "generate_pfx"
-  | "generate_p12"
-  | "extract_pkcs12"
-  | "build_bundle";
-
-type ConversionOption = {
-  key: ConversionKey;
-  label: string;
-  requirements: string;
-  passwordMode: "none" | "source" | "output" | "source-and-output";
-  isEnabled: boolean;
-  run: () => Promise<void>;
-  buttonLabel: string;
-  primary?: boolean;
-};
+import { ArtifactsList } from "./ArtifactsList";
+import { errorMessage, formatExpiration, hasType, type ConversionOption, type ConversionKey } from "./helpers";
+import { JobInputsPanel } from "./JobInputsPanel";
+import { RecipeActionForm } from "./RecipeActionForm";
 
 export function JobRecipes(props: { jobId: string; onReset?: () => void }) {
   const jobId = props.jobId;
-
   const [job, setJob] = useState<JobPublic | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [selectedAction, setSelectedAction] = useState<ConversionKey>("export_pem");
-
   const [sourcePassword, setSourcePassword] = useState("");
   const [outputPassword, setOutputPassword] = useState("");
   const [showSourcePassword, setShowSourcePassword] = useState(false);
   const [showOutputPassword, setShowOutputPassword] = useState(false);
 
   async function refresh() {
-    const j = await getJob(jobId);
-    setJob(j);
+    setJob(await getJob(jobId));
   }
 
   function clearAll() {
@@ -83,10 +42,10 @@ export function JobRecipes(props: { jobId: string; onReset?: () => void }) {
 
     (async () => {
       try {
-        const j = await getJob(jobId);
-        if (alive) setJob(j);
-      } catch (e: unknown) {
-        if (alive) setErr(errorMessage(e, "Falha ao carregar job"));
+        const nextJob = await getJob(jobId);
+        if (alive) setJob(nextJob);
+      } catch (error: unknown) {
+        if (alive) setErr(errorMessage(error, "Nao foi possivel carregar esse processamento."));
       }
     })();
 
@@ -98,16 +57,25 @@ export function JobRecipes(props: { jobId: string; onReset?: () => void }) {
   const hasCert = useMemo(() => hasType(job, "x509_certificate"), [job]);
   const hasKey = useMemo(() => hasType(job, "private_key"), [job]);
   const hasPkcs12 = useMemo(() => hasType(job, "pkcs12"), [job]);
-
+  const certificateItems = job?.parsed?.filter((item) => item.detectedType === "x509_certificate") ?? [];
+  const hasLeafCertificate = certificateItems.some((item) => !item.isCertificateAuthority);
+  const hasIntermediateCertificate = certificateItems.some((item) => item.isCertificateAuthority && !item.isSelfSigned);
   const onlyPkcs12 = hasPkcs12 && !hasCert && !hasKey;
-  const canBuildBundle = hasCert;
-  const canExtractPkcs12 = hasPkcs12;
-  const canExportCert = hasCert || hasPkcs12;
-  const canExportKey = hasKey || hasPkcs12;
-  const canGeneratePkcs12 = (hasCert && hasKey) || hasPkcs12;
-
   const warnings: Warning[] = job?.analysis?.warnings ?? [];
+  const keyCertMismatch = warnings.find((warning) => warning.code === "KEY_CERT_MISMATCH") ?? null;
+  const ambiguousPairWarning = warnings.find((warning) => warning.code === "AMBIGUOUS_CERT_KEY_PAIR") ?? null;
+  const missingIntermediateWarning = warnings.find((warning) => warning.code === "INTERMEDIATE_CERT_REQUIRED") ?? null;
+  const missingServerCertWarning = warnings.find((warning) => warning.code === "SERVER_CERT_REQUIRED") ?? null;
+  const ambiguousServerCertWarning = warnings.find((warning) => warning.code === "AMBIGUOUS_SERVER_CERTIFICATE") ?? null;
+  const multipleCertificatesWarning = warnings.find((warning) => warning.code === "MULTIPLE_CERTIFICATES") ?? null;
+  const multiplePrivateKeysWarning = warnings.find((warning) => warning.code === "MULTIPLE_PRIVATE_KEYS") ?? null;
+  const encryptedKeyWarning = warnings.find((warning) => warning.code === "KEY_ENCRYPTED") ?? null;
+  const invalidChainWarning = warnings.find((warning) => warning.code === "CHAIN_INVALID") ?? null;
+  const rootIncludedWarning = warnings.find((warning) => warning.code === "ROOT_INCLUDED") ?? null;
   const artifacts = job?.artifacts ?? [];
+  const jobMissing = !job && !loading && !err;
+  const canExportCertificateOnly = hasCert && !multipleCertificatesWarning;
+  const expirationText = formatExpiration(job?.expiresAt);
 
   async function doRecipe(recipe: string, body?: Record<string, unknown>) {
     setErr(null);
@@ -116,8 +84,12 @@ export function JobRecipes(props: { jobId: string; onReset?: () => void }) {
     try {
       await runRecipe(jobId, recipe, body ?? {});
       await refresh();
-    } catch (e: unknown) {
-      setErr(errorMessage(e, "Erro ao executar ação"));
+    } catch (error: unknown) {
+      const message = errorMessage(error, "Nao foi possivel concluir essa conversao.");
+      if (/expirado|nao encontrado/i.test(message)) {
+        props.onReset?.();
+      }
+      setErr(message);
     } finally {
       setLoading(false);
       setBusy(null);
@@ -136,27 +108,45 @@ export function JobRecipes(props: { jobId: string; onReset?: () => void }) {
     {
       key: "export_pem",
       label: "Exportar PEM",
-      requirements: onlyPkcs12 ? "PFX/P12 + senha de origem" : "Certificado (.pem/.crt) ou PFX/P12",
+      requirements: onlyPkcs12 ? "PFX/P12 + senha de origem" : "Certificado (.pem/.crt/.cer/.der) ou PFX/P12",
+      resultLabel: "Um arquivo PEM com o certificado.",
+      deploymentHint: "Use quando o servidor pedir o certificado principal em PEM.",
+      passwordHint: onlyPkcs12 ? "Informe a senha do arquivo enviado." : undefined,
       passwordMode: onlyPkcs12 ? "source" : "none",
-      isEnabled: canExportCert,
+      isEnabled: (hasCert || hasPkcs12) && !multipleCertificatesWarning,
+      unavailableReason: multipleCertificatesWarning
+        ? "Encontramos mais de um certificado. Envie apenas o certificado que voce quer exportar."
+        : undefined,
       run: () => exportFormats(["pem"]),
       buttonLabel: "Exportar PEM"
     },
     {
       key: "export_crt",
       label: "Exportar CRT",
-      requirements: onlyPkcs12 ? "PFX/P12 + senha de origem" : "Certificado (.pem/.crt) ou PFX/P12",
+      requirements: onlyPkcs12 ? "PFX/P12 + senha de origem" : "Certificado (.pem/.crt/.cer/.der) ou PFX/P12",
+      resultLabel: "Um arquivo CRT com o certificado principal.",
+      deploymentHint: "Use este arquivo como certificado principal em servidores que pedem CRT ou CER.",
+      passwordHint: onlyPkcs12 ? "Informe a senha do arquivo enviado." : undefined,
       passwordMode: onlyPkcs12 ? "source" : "none",
-      isEnabled: canExportCert,
+      isEnabled: (hasCert || hasPkcs12) && !multipleCertificatesWarning,
+      unavailableReason: multipleCertificatesWarning
+        ? "Encontramos mais de um certificado. Envie apenas o certificado que voce quer exportar."
+        : undefined,
       run: () => exportFormats(["crt"]),
       buttonLabel: "Exportar CRT"
     },
     {
       key: "export_der",
       label: "Exportar DER",
-      requirements: onlyPkcs12 ? "PFX/P12 + senha de origem" : "Certificado (.pem/.crt) ou PFX/P12",
+      requirements: onlyPkcs12 ? "PFX/P12 + senha de origem" : "Certificado (.pem/.crt/.cer/.der) ou PFX/P12",
+      resultLabel: "Um arquivo DER com o certificado principal.",
+      deploymentHint: "Use quando a plataforma exigir o certificado em DER binario.",
+      passwordHint: onlyPkcs12 ? "Informe a senha do arquivo enviado." : undefined,
       passwordMode: onlyPkcs12 ? "source" : "none",
-      isEnabled: canExportCert,
+      isEnabled: (hasCert || hasPkcs12) && !multipleCertificatesWarning,
+      unavailableReason: multipleCertificatesWarning
+        ? "Encontramos mais de um certificado. Envie apenas o certificado que voce quer exportar."
+        : undefined,
       run: () => exportFormats(["der"]),
       buttonLabel: "Exportar DER"
     },
@@ -164,17 +154,55 @@ export function JobRecipes(props: { jobId: string; onReset?: () => void }) {
       key: "export_key",
       label: "Exportar KEY",
       requirements: onlyPkcs12 ? "PFX/P12 + senha de origem" : "Chave privada (.key/.pem) ou PFX/P12",
+      resultLabel: "Um arquivo KEY com a chave privada.",
+      deploymentHint: "Use este arquivo como chave privada correspondente ao certificado principal.",
+      passwordHint: onlyPkcs12 ? "Informe a senha do arquivo enviado." : undefined,
       passwordMode: onlyPkcs12 ? "source" : "none",
-      isEnabled: canExportKey,
+      isEnabled: (hasKey || hasPkcs12) && !multiplePrivateKeysWarning && !ambiguousPairWarning,
+      unavailableReason: multiplePrivateKeysWarning
+        ? "Encontramos mais de uma chave privada. Envie apenas a chave que voce quer exportar."
+        : ambiguousPairWarning
+          ? "Nao foi possivel identificar qual chave deve ser usada. Envie apenas um par de arquivos."
+          : undefined,
       run: () => exportFormats(["key"]),
       buttonLabel: "Exportar KEY"
     },
     {
       key: "generate_pfx",
       label: "Gerar PFX",
-      requirements: onlyPkcs12 ? "PFX/P12 + senha de origem" : "Certificado + chave privada ou PFX/P12",
+      requirements: onlyPkcs12
+        ? "PFX/P12 completo + senha de origem"
+        : "Certificado do servidor + chave privada correspondente + intermediarios",
+      resultLabel: "Um arquivo PFX pronto para uso no servidor.",
+      passwordHint: onlyPkcs12
+        ? "Informe a senha do arquivo enviado e a senha do novo PFX."
+        : "Informe a senha do novo arquivo PFX.",
+      validationHint: onlyPkcs12
+        ? "Vamos usar o certificado e a chave do arquivo enviado para gerar um novo PFX."
+        : "Antes de gerar o arquivo, vamos verificar se a chave privada pertence ao certificado enviado e se a cadeia esta correta.",
+      deploymentHint: "Use este arquivo unico em IIS, Windows ou em plataformas que importam PFX/P12.",
       passwordMode: onlyPkcs12 ? "source-and-output" : "output",
-      isEnabled: canGeneratePkcs12,
+      isEnabled:
+        (((hasLeafCertificate && hasKey && hasIntermediateCertificate) || hasPkcs12) &&
+          !keyCertMismatch &&
+          !ambiguousPairWarning &&
+          !missingIntermediateWarning &&
+          !missingServerCertWarning &&
+          !ambiguousServerCertWarning &&
+          !invalidChainWarning),
+      unavailableReason: keyCertMismatch
+        ? "Para gerar PFX, envie a chave privada correspondente a este certificado."
+        : ambiguousPairWarning
+          ? "Nao foi possivel identificar um unico par de certificado e chave para gerar o PFX."
+          : missingIntermediateWarning
+            ? "Para gerar PFX, envie tambem o certificado intermediario da cadeia."
+            : missingServerCertWarning
+              ? "Para gerar PFX, envie o certificado principal do servidor."
+              : ambiguousServerCertWarning
+                ? "Encontramos mais de um certificado principal. Envie apenas o certificado do servidor correto."
+                : invalidChainWarning
+                  ? "Os certificados enviados nao formam uma cadeia valida para gerar um PFX pronto para servidor."
+          : undefined,
       run: () => exportFormats(["pfx"], true),
       buttonLabel: "Gerar PFX",
       primary: true
@@ -182,9 +210,39 @@ export function JobRecipes(props: { jobId: string; onReset?: () => void }) {
     {
       key: "generate_p12",
       label: "Gerar P12",
-      requirements: onlyPkcs12 ? "PFX/P12 + senha de origem" : "Certificado + chave privada ou PFX/P12",
+      requirements: onlyPkcs12
+        ? "PFX/P12 completo + senha de origem"
+        : "Certificado do servidor + chave privada correspondente + intermediarios",
+      resultLabel: "Um arquivo P12 pronto para uso no servidor.",
+      passwordHint: onlyPkcs12
+        ? "Informe a senha do arquivo enviado e a senha do novo P12."
+        : "Informe a senha do novo arquivo P12.",
+      validationHint: onlyPkcs12
+        ? "Vamos usar o certificado e a chave do arquivo enviado para gerar um novo P12."
+        : "Antes de gerar o arquivo, vamos verificar se a chave privada pertence ao certificado enviado e se a cadeia esta correta.",
+      deploymentHint: "Use este arquivo unico quando a plataforma pedir um P12 com certificado, chave e cadeia.",
       passwordMode: onlyPkcs12 ? "source-and-output" : "output",
-      isEnabled: canGeneratePkcs12,
+      isEnabled:
+        (((hasLeafCertificate && hasKey && hasIntermediateCertificate) || hasPkcs12) &&
+          !keyCertMismatch &&
+          !ambiguousPairWarning &&
+          !missingIntermediateWarning &&
+          !missingServerCertWarning &&
+          !ambiguousServerCertWarning &&
+          !invalidChainWarning),
+      unavailableReason: keyCertMismatch
+        ? "Para gerar P12, envie a chave privada correspondente a este certificado."
+        : ambiguousPairWarning
+          ? "Nao foi possivel identificar um unico par de certificado e chave para gerar o P12."
+          : missingIntermediateWarning
+            ? "Para gerar P12, envie tambem o certificado intermediario da cadeia."
+            : missingServerCertWarning
+              ? "Para gerar P12, envie o certificado principal do servidor."
+              : ambiguousServerCertWarning
+                ? "Encontramos mais de um certificado principal. Envie apenas o certificado do servidor correto."
+                : invalidChainWarning
+                  ? "Os certificados enviados nao formam uma cadeia valida para gerar um P12 pronto para servidor."
+          : undefined,
       run: () => exportFormats(["p12"], true),
       buttonLabel: "Gerar P12",
       primary: true
@@ -193,19 +251,45 @@ export function JobRecipes(props: { jobId: string; onReset?: () => void }) {
       key: "extract_pkcs12",
       label: "Extrair PKCS#12",
       requirements: "PFX/P12 + senha de origem",
+      resultLabel: "Certificado, chave privada e, quando existirem, os arquivos de chain e fullchain.",
+      deploymentHint: "Use os arquivos extraidos conforme o tipo de servidor: CRT + KEY + CHAIN ou FULLCHAIN.",
+      passwordHint: "Informe a senha do arquivo enviado para extrair os arquivos.",
       passwordMode: "source",
-      isEnabled: canExtractPkcs12,
+      isEnabled: hasPkcs12,
       run: () => doRecipe("extract_pkcs12", { password: sourcePassword }),
       buttonLabel: "Extrair PKCS#12"
     },
     {
       key: "build_bundle",
-      label: "Gerar Bundle",
-      requirements: "Certificado(s) em PEM/CRT",
-      passwordMode: "none",
-      isEnabled: canBuildBundle,
-      run: () => doRecipe("build_bundle"),
-      buttonLabel: "Gerar Bundle"
+      label: "Gerar Fullchain",
+      requirements: onlyPkcs12
+        ? "PFX/P12 com certificado principal e intermediarios + senha de origem"
+        : "Certificado do servidor + intermediarios da cadeia",
+      resultLabel: "Um arquivo fullchain pronto para uso no servidor.",
+      deploymentHint: "Use este arquivo como fullchain em Nginx, Apache e outros servidores Linux.",
+      validationHint: "Vamos verificar se os intermediarios pertencem ao certificado principal e montar o fullchain na ordem correta.",
+      passwordHint: onlyPkcs12 ? "Informe a senha do arquivo enviado para montar o fullchain." : undefined,
+      passwordMode: onlyPkcs12 ? "source" : "none",
+      isEnabled:
+        ((hasLeafCertificate && hasIntermediateCertificate) || hasPkcs12) &&
+        !multipleCertificatesWarning &&
+        !missingIntermediateWarning &&
+        !missingServerCertWarning &&
+        !ambiguousServerCertWarning &&
+        !invalidChainWarning,
+      unavailableReason: missingIntermediateWarning
+        ? "Para gerar o fullchain, envie tambem o certificado intermediario da cadeia."
+        : missingServerCertWarning
+          ? "Para gerar o fullchain, envie o certificado principal do servidor."
+          : ambiguousServerCertWarning
+            ? "Encontramos mais de um certificado principal. Envie apenas o certificado do servidor correto."
+        : invalidChainWarning
+          ? "Os certificados enviados nao formam uma cadeia valida para montar o fullchain."
+        : multipleCertificatesWarning
+          ? "Encontramos mais de um certificado. Envie apenas os certificados da mesma cadeia."
+        : undefined,
+      run: () => doRecipe("build_bundle", onlyPkcs12 ? { sourcePassword } : undefined),
+      buttonLabel: "Gerar Fullchain"
     }
   ];
 
@@ -215,223 +299,144 @@ export function JobRecipes(props: { jobId: string; onReset?: () => void }) {
   const requiresOutputPassword =
     selected.passwordMode === "output" || selected.passwordMode === "source-and-output";
   const missingPassword =
-    (requiresSourcePassword && !sourcePassword.trim()) ||
-    (requiresOutputPassword && !outputPassword.trim());
+    (requiresSourcePassword && sourcePassword.trim().length === 0) ||
+    (requiresOutputPassword && outputPassword.trim().length === 0);
 
   return (
     <div className="card">
       <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
         <div>
-          <div className="sectionTitle">Conversor de arquivos</div>
-          <div className="small">
-            Job: <code>{jobId}</code>
-          </div>
+          <div className="sectionTitle">Converter arquivos</div>
+          <div className="small">Escolha o tipo de arquivo que voce quer gerar. {expirationText}</div>
         </div>
 
         <div className="row" style={{ gap: 8 }}>
           <button
             className="btn"
             disabled={loading}
-            onClick={() =>
-              refresh().catch((e: unknown) => setErr(errorMessage(e, "Falha ao atualizar")))
-            }
+            onClick={() => refresh().catch((error: unknown) => setErr(errorMessage(error, "Nao foi possivel atualizar os dados.")))}
+            type="button"
           >
             Atualizar
           </button>
-          <button className="btn" disabled={loading} onClick={clearAll}>
-            Novo Job
+          <button className="btn" disabled={loading} onClick={clearAll} type="button">
+            Enviar novos arquivos
           </button>
         </div>
       </div>
 
       <div className="divider" />
 
-      {err ? <Alert kind="err" title="Erro" message={err} /> : null}
+      {err ? <Alert kind="err" title="Nao foi possivel concluir a conversao" message={err} /> : null}
+      {keyCertMismatch ? (
+        <div style={{ marginTop: 12 }}>
+          <Alert
+            kind="warn"
+            title="A chave privada nao corresponde a este certificado"
+            message={
+              canExportCertificateOnly
+                ? "Voce ainda pode exportar arquivos do certificado, como PEM, CRT e DER. Para gerar PFX ou P12, envie a chave privada correspondente."
+                : keyCertMismatch.message
+            }
+          />
+        </div>
+      ) : null}
+      {!keyCertMismatch && ambiguousPairWarning ? (
+        <div style={{ marginTop: 12 }}>
+          <Alert
+            kind="err"
+            title="Nao foi possivel escolher um unico par de arquivos"
+            message={ambiguousPairWarning.message}
+          />
+        </div>
+      ) : null}
+      {missingIntermediateWarning ? (
+        <div style={{ marginTop: 12 }}>
+          <Alert kind="warn" title="Certificado intermediario necessario" message={missingIntermediateWarning.message} />
+        </div>
+      ) : null}
+      {missingServerCertWarning ? (
+        <div style={{ marginTop: 12 }}>
+          <Alert kind="warn" title="Certificado principal do servidor necessario" message={missingServerCertWarning.message} />
+        </div>
+      ) : null}
+      {ambiguousServerCertWarning ? (
+        <div style={{ marginTop: 12 }}>
+          <Alert kind="warn" title="Mais de um certificado principal encontrado" message={ambiguousServerCertWarning.message} />
+        </div>
+      ) : null}
+      {invalidChainWarning ? (
+        <div style={{ marginTop: 12 }}>
+          <Alert kind="err" title="A cadeia de certificados nao esta correta" message={invalidChainWarning.message} />
+        </div>
+      ) : null}
+      {multipleCertificatesWarning ? (
+        <div style={{ marginTop: 12 }}>
+          <Alert kind="warn" title="Mais de um certificado encontrado" message={multipleCertificatesWarning.message} />
+        </div>
+      ) : null}
+      {multiplePrivateKeysWarning ? (
+        <div style={{ marginTop: 12 }}>
+          <Alert kind="warn" title="Mais de uma chave privada encontrada" message={multiplePrivateKeysWarning.message} />
+        </div>
+      ) : null}
+      {!keyCertMismatch && encryptedKeyWarning ? (
+        <div style={{ marginTop: 12 }}>
+          <Alert kind="warn" title="Atencao antes de gerar PFX ou P12" message={encryptedKeyWarning.message} />
+        </div>
+      ) : null}
+      {rootIncludedWarning ? (
+        <div style={{ marginTop: 12 }}>
+          <Alert kind="warn" title="Certificado raiz encontrado" message={rootIncludedWarning.message} />
+        </div>
+      ) : null}
+      {jobMissing ? (
+        <Alert
+          kind="warn"
+          title="Arquivos expirados"
+          message="Os arquivos enviados nao estao mais disponiveis. Envie novamente para continuar."
+        />
+      ) : null}
 
       <div className="grid2" style={{ marginTop: 12 }}>
-        <div className="cardInner">
-          <div className="sectionTitle">Entradas do job</div>
+        <JobInputsPanel job={job} warnings={warnings} />
 
-          {job?.inputs?.length ? (
-            <div className="list">
-              {job.inputs.map((f) => (
-                <div className="listRow" key={f.id}>
-                  <div className="listMain">
-                    <div className="listTitle">{f.originalName}</div>
-                    <div className="small">
-                      {bytes(f.size)} • {f.mimeType}
-                    </div>
-                  </div>
-                  <div className="pill">{f.id}</div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="small">Carregando...</div>
-          )}
+        <div className="cardInner">
+          <div className="sectionTitle">Tipo de conversao</div>
+          <div className="small">Escolha o arquivo que voce quer gerar.</div>
+
+          <RecipeActionForm
+            selectedKey={selectedAction}
+            selected={selected}
+            options={options}
+            loading={loading}
+            busy={busy}
+            missingPassword={missingPassword}
+            requiresSourcePassword={requiresSourcePassword}
+            requiresOutputPassword={requiresOutputPassword}
+            sourcePassword={sourcePassword}
+            outputPassword={outputPassword}
+            showSourcePassword={showSourcePassword}
+            showOutputPassword={showOutputPassword}
+            onChangeSelected={setSelectedAction}
+            onChangeSourcePassword={setSourcePassword}
+            onChangeOutputPassword={setOutputPassword}
+            onToggleSourcePassword={() => setShowSourcePassword((state) => !state)}
+            onToggleOutputPassword={() => setShowOutputPassword((state) => !state)}
+          />
 
           <div className="divider" />
 
-          <div className="sectionTitle">Detecção</div>
-          {(job?.parsed ?? []).length ? (
-            <div className="chips">
-              {(job?.parsed ?? []).map((p: ParsedItem, idx: number) => (
-                <div className="chip" key={`${p.inputId}:${p.detectedType}:${idx}`}>
-                  <strong>{String(p.detectedType).toUpperCase()}</strong>
-                  <span className="small" title={p.subject ?? p.inputId}>
-                    {p.subject ? p.subject : p.inputId}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="small">Nenhum arquivo detectado ainda.</div>
-          )}
-
-          {warnings.length ? (
-            <>
-              <div className="divider" />
-              <div className="sectionTitle">Avisos</div>
-              <div className="list">
-                {warnings.map((w, i) => (
-                  <Alert key={i} kind="warn" title={w.code} message={w.message} />
-                ))}
-              </div>
-            </>
-          ) : null}
-        </div>
-
-        <div className="cardInner">
-          <div className="sectionTitle">Conversão</div>
-          <div className="small">Escolha o formato e execute uma ação por vez.</div>
-
-          <div className="conversionPanel">
-            <div className="conversionTopbar">
-              <div className="conversionField">
-                <label className="small">Tipo de conversão</label>
-                <select
-                  className="input selectInput"
-                  value={selected.key}
-                  onChange={(e) => setSelectedAction(e.target.value as ConversionKey)}
-                >
-                  {options.map((option) => (
-                    <option key={option.key} value={option.key}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="conversionActions">
-                <button
-                  className={selected.primary ? "btn primary" : "btn"}
-                  disabled={!selected.isEnabled || loading || missingPassword}
-                  onClick={() => selected.run()}
-                >
-                  {busy ? "Processando..." : selected.buttonLabel}
-                </button>
-              </div>
-            </div>
-
-            <div className="conversionSummary">
-              <div className="conversionSummaryRow">
-                <span className="recipeLabel">Necessário</span>
-                <strong>{selected.requirements}</strong>
-              </div>
-              {!selected.isEnabled ? (
-                <div className="conversionSummaryRow">
-                  <span className="recipeLabel">Status</span>
-                  <strong>Envie os arquivos exigidos para habilitar esta conversão.</strong>
-                </div>
-              ) : null}
-              <div className="conversionMeta">
-                <div className="metaChip">
-                  <span className="recipeLabel">Formato</span>
-                  <strong>{selected.label}</strong>
-                </div>
-                <div className="metaChip">
-                  <span className="recipeLabel">Senha</span>
-                  <strong>
-                    {requiresSourcePassword && requiresOutputPassword
-                      ? "Origem + geração"
-                      : requiresSourcePassword
-                        ? "Arquivo de origem"
-                        : requiresOutputPassword
-                          ? "Arquivo gerado"
-                          : "Não exige"}
-                  </strong>
-                </div>
-              </div>
-            </div>
-
-            {requiresSourcePassword ? (
-              <div className="conversionField">
-                <label className="small">Senha do arquivo de origem</label>
-                <div className="row actionPasswordControls">
-                  <input
-                    className="input"
-                    type={showSourcePassword ? "text" : "password"}
-                    value={sourcePassword}
-                    onChange={(e) => setSourcePassword(e.target.value)}
-                    placeholder="senha do PFX/P12"
-                    autoComplete="off"
-                    inputMode="text"
-                  />
-                  <button className="btn" type="button" onClick={() => setShowSourcePassword((s) => !s)}>
-                    {showSourcePassword ? "Ocultar" : "Mostrar"}
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
-            {requiresOutputPassword ? (
-              <div className="conversionField">
-                <label className="small">Senha do arquivo gerado</label>
-                <div className="row actionPasswordControls">
-                  <input
-                    className="input"
-                    type={showOutputPassword ? "text" : "password"}
-                    value={outputPassword}
-                    onChange={(e) => setOutputPassword(e.target.value)}
-                    placeholder="defina a senha"
-                    autoComplete="off"
-                    inputMode="text"
-                  />
-                  <button className="btn" type="button" onClick={() => setShowOutputPassword((s) => !s)}>
-                    {showOutputPassword ? "Ocultar" : "Mostrar"}
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
+          <ArtifactsList
+            artifacts={artifacts}
+            onDownload={(artifactId, filename) => downloadArtifact(jobId, artifactId, filename)}
+          />
+          <div className="small" style={{ marginTop: 10 }}>
+            Arquivos gerados ficam disponiveis por tempo limitado. {expirationText}
           </div>
-
-          <div className="divider" />
-
-          <div className="sectionTitle">Arquivos gerados</div>
-          {artifacts.length ? (
-            <div className="list">
-              {artifacts.map((a) => (
-                <div className="listRow" key={a.id}>
-                  <div className="listMain">
-                    <div className="listTitle" title={a.filename}>
-                      {a.filename}
-                    </div>
-                    <div className="small">
-                      {bytes(a.size)} • {a.mimeType}
-                    </div>
-                  </div>
-                  <button className="btn" onClick={() => downloadArtifact(jobId, a.id)}>
-                    Download
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="small">Nenhum arquivo gerado ainda.</div>
-          )}
         </div>
       </div>
     </div>
   );
 }
+

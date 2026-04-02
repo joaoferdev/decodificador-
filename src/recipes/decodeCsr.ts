@@ -1,116 +1,104 @@
-import forge from "../vendor/forge.js";
-import type { InputFile, ParsedObject } from "../domain/types.js";
+import type { DecodedCsrAnalysis, InputFile, ParsedObject, WarningItem } from "../domain/types.js";
+import {
+  type CsrLike,
+  type DistinguishedNameAttribute,
+  certificationRequestFromPem,
+  getOidMap
+} from "../crypto/forgeAdapter.js";
 import { splitPemBlocks } from "../utils/pem.js";
 import { sha1Hex, sha256Hex } from "../services/fingerprints.js";
 import { ToolkitException } from "../utils/errors.js";
 
 type SubjectMap = Record<string, string | string[]>;
-
-type Warning = { code: string; message: string };
+type BasicConstraints = NonNullable<DecodedCsrAnalysis["extensions"]["basicConstraints"]>;
 
 const WEAK_SIG_OIDS = new Set([
-  "1.2.840.113549.1.1.5", // sha1WithRSAEncryption
-  "1.3.14.3.2.29" // sha1WithRSAEncryption legado
+  "1.2.840.113549.1.1.5",
+  "1.3.14.3.2.29"
 ]);
 
-function dnToString(dn: any): string {
+function dnToString(attributesLike: { attributes?: DistinguishedNameAttribute[] }): string {
   try {
-    return (dn.attributes ?? []).map((a: any) => `${a.shortName || a.name}=${a.value}`).join(", ");
+    return (attributesLike.attributes ?? [])
+      .map((attribute) => `${attribute.shortName || attribute.name}=${String(attribute.value ?? "")}`)
+      .join(", ");
   } catch {
     return "";
   }
 }
 
-function dnToObject(dn: any): SubjectMap {
-  const out: SubjectMap = {};
-  const attrs = (dn?.attributes ?? []) as any[];
+function dnToObject(attributesLike: { attributes?: DistinguishedNameAttribute[] }): SubjectMap {
+  const output: SubjectMap = {};
 
-  for (const a of attrs) {
-    const key = (a.shortName || a.name || a.type || "UNKNOWN") as string;
-    const val = String(a.value ?? "");
+  for (const attribute of attributesLike.attributes ?? []) {
+    const key = String(attribute.shortName || attribute.name || attribute.type || "UNKNOWN");
+    const value = String(attribute.value ?? "");
 
-    if (out[key] === undefined) {
-      out[key] = val;
+    if (output[key] === undefined) {
+      output[key] = value;
       continue;
     }
 
-    const cur = out[key];
-    out[key] = Array.isArray(cur) ? [...cur, val] : [cur, val];
+    const current = output[key];
+    output[key] = Array.isArray(current) ? [...current, value] : [current, value];
   }
 
-  return out;
+  return output;
 }
 
 function oidToName(oid: string | undefined): string | undefined {
   if (!oid) return undefined;
-
-  const oids: Record<string, string> = (forge.pki as any).oids ?? {};
-  const hit = Object.entries(oids).find(([, v]) => v === oid);
+  const oids = getOidMap();
+  const hit = Object.entries(oids).find(([, value]) => value === oid);
   return hit?.[0];
 }
 
-function publicKeyInfoFromCsr(csr: any): { algorithm: "RSA" | "EC" | "UNKNOWN"; bits?: number; exponent?: number } {
-  const pk: any = csr?.publicKey;
+function publicKeyInfoFromCsr(csr: CsrLike): DecodedCsrAnalysis["publicKey"] {
+  const publicKey = csr.publicKey;
 
-  // RSA
-  if (pk?.n?.bitLength && pk?.e) {
-    const bits = Number(pk.n.bitLength());
-    const exp = typeof pk.e?.intValue === "function" ? pk.e.intValue() : undefined;
-
+  if (publicKey?.n?.bitLength && publicKey.e) {
+    const bits = Number(publicKey.n.bitLength());
+    const exponent = typeof publicKey.e.intValue === "function" ? publicKey.e.intValue() : undefined;
     return {
       algorithm: "RSA",
       ...(Number.isFinite(bits) ? { bits } : {}),
-      ...(Number.isFinite(exp) ? { exponent: exp } : {})
+      ...(typeof exponent === "number" && Number.isFinite(exponent) ? { exponent } : {})
     };
   }
 
-  // EC (forge varia)
-  if (pk?.type === "ec" || pk?.curve || pk?.ecdsa || pk?.ecparams) {
+  if (publicKey?.type === "ec" || publicKey?.curve || publicKey?.ecdsa || publicKey?.ecparams) {
     return { algorithm: "EC" };
   }
 
   return { algorithm: "UNKNOWN" };
 }
 
-function getExtensionRequest(csr: any): any[] {
+function getExtensionRequest(csr: CsrLike) {
   try {
-    const attr = csr.getAttribute({ name: "extensionRequest" });
-    return attr?.extensions ?? [];
+    return csr.getAttribute?.({ name: "extensionRequest" })?.extensions ?? [];
   } catch {
     return [];
   }
 }
 
-function parseSAN(ext: any): { dns?: string[]; ip?: string[]; email?: string[]; uri?: string[]; other?: any[] } {
-  const altNames = ext?.altNames ?? [];
+function parseSan(extension: { altNames?: Array<{ type?: number; value?: unknown }> }) {
   const dns: string[] = [];
   const ip: string[] = [];
   const email: string[] = [];
   const uri: string[] = [];
-  const other: any[] = [];
 
-  for (const a of altNames) {
-    // 1=email, 2=dns, 6=uri, 7=ip
-    if (a?.type === 2 && typeof a.value === "string") dns.push(a.value);
-    else if (a?.type === 7) {
-      if (typeof a.value === "string") ip.push(a.value);
-      else other.push(a);
-    } else if (a?.type === 1 && typeof a.value === "string") email.push(a.value);
-    else if (a?.type === 6 && typeof a.value === "string") uri.push(a.value);
-    else other.push(a);
+  for (const altName of extension.altNames ?? []) {
+    if (altName.type === 2 && typeof altName.value === "string") dns.push(altName.value);
+    else if (altName.type === 7 && typeof altName.value === "string") ip.push(altName.value);
+    else if (altName.type === 1 && typeof altName.value === "string") email.push(altName.value);
+    else if (altName.type === 6 && typeof altName.value === "string") uri.push(altName.value);
   }
 
-  return {
-    ...(dns.length ? { dns } : {}),
-    ...(ip.length ? { ip } : {}),
-    ...(email.length ? { email } : {}),
-    ...(uri.length ? { uri } : {}),
-    ...(other.length ? { other } : {})
-  };
+  return { dns, ip, email, uri };
 }
 
-function parseKeyUsage(ext: any): string[] {
-  if (!ext) return [];
+function parseKeyUsage(extension: Record<string, unknown> | undefined): string[] {
+  if (!extension) return [];
   const keys = [
     "digitalSignature",
     "nonRepudiation",
@@ -122,159 +110,108 @@ function parseKeyUsage(ext: any): string[] {
     "encipherOnly",
     "decipherOnly"
   ];
-  return keys.filter((k) => ext[k] === true);
+  return keys.filter((key) => extension[key] === true);
 }
 
-function parseExtKeyUsage(ext: any): string[] {
-  if (!ext) return [];
-  return Object.keys(ext).filter((k) => ext[k] === true);
+function parseExtKeyUsage(extension: Record<string, unknown> | undefined): string[] {
+  if (!extension) return [];
+  return Object.keys(extension).filter((key) => extension[key] === true);
 }
 
-function parseBasicConstraints(ext: any): { ca?: boolean; pathLenConstraint?: number } {
-  if (!ext) return {};
-  const ca = typeof ext.cA === "boolean" ? ext.cA : undefined;
-  const plc = typeof ext.pathLenConstraint === "number" ? ext.pathLenConstraint : undefined;
-
+function parseBasicConstraints(extension: { cA?: boolean; pathLenConstraint?: number } | undefined): BasicConstraints {
+  if (!extension) return {};
   return {
-    ...(ca !== undefined ? { ca } : {}),
-    ...(plc !== undefined ? { pathLenConstraint: plc } : {})
+    ...(typeof extension.cA === "boolean" ? { ca: extension.cA } : {}),
+    ...(typeof extension.pathLenConstraint === "number"
+      ? { pathLenConstraint: extension.pathLenConstraint }
+      : {})
   };
 }
 
 function findCsrPemFromFiles(files: InputFile[], parsed: ParsedObject[]): { pem: string; inputId: string } {
-  const csrParsed = parsed.find((p) => p.detectedType === "csr");
-  const fileId = csrParsed?.inputId;
+  const parsedCsr = parsed.find((item) => item.detectedType === "csr");
+  const candidates = parsedCsr ? files.filter((file) => file.id === parsedCsr.inputId) : files;
 
-  const candidates = fileId ? files.filter((f) => f.id === fileId) : files;
-
-  for (const f of candidates) {
-    const text = f.bytes.toString("utf8");
-    const blocks = splitPemBlocks(text);
-    for (const b of blocks) {
-      if (/BEGIN (NEW )?CERTIFICATE REQUEST/i.test(b)) {
-        return { pem: b, inputId: f.id };
+  for (const file of candidates) {
+    const blocks = splitPemBlocks(file.bytes.toString("utf8"));
+    for (const block of blocks) {
+      if (/BEGIN (NEW )?CERTIFICATE REQUEST/i.test(block)) {
+        return { pem: block, inputId: file.id };
       }
     }
   }
 
-  throw new ToolkitException("CSR_NOT_FOUND", "Nenhum CSR (BEGIN CERTIFICATE REQUEST) foi encontrado no job.", 400);
+  throw new ToolkitException("CSR_NOT_FOUND", "Nao encontramos um CSR valido nos dados enviados.", 400);
 }
 
-function parseCsr(pem: string): any {
+function parseCsr(pem: string): CsrLike {
   try {
-    return (forge.pki as any).certificationRequestFromPem(pem);
-  } catch (e: any) {
-    throw new ToolkitException("CSR_PARSE_FAILED", `Falha ao ler CSR PEM: ${e?.message ?? String(e)}`, 400);
+    return certificationRequestFromPem(pem);
+  } catch (error: unknown) {
+    throw new ToolkitException("CSR_PARSE_FAILED", "Nao foi possivel ler o CSR enviado.", 400);
   }
 }
 
-export function recipeDecodeCsr(
-  files: InputFile[],
-  parsed: ParsedObject[]
-): {
-  inputId: string;
-  type: "csr";
-  subjectString: string;
-  subject: SubjectMap;
-  publicKey: { algorithm: "RSA" | "EC" | "UNKNOWN"; bits?: number; exponent?: number };
-  signature: { valid: boolean; algorithm?: string; oid?: string };
-  extensions: {
-    subjectAltName: { dns: string[]; ip: string[]; email: string[]; uri: string[] };
-    keyUsage: string[];
-    extendedKeyUsage: string[];
-    basicConstraints: ReturnType<typeof parseBasicConstraints>;
-    raw?: any[];
-  };
-  fingerprints: { sha1: string; sha256: string };
-  warnings: Warning[];
-} {
+export function recipeDecodeCsr(files: InputFile[], parsed: ParsedObject[]): DecodedCsrAnalysis {
   const { pem, inputId } = findCsrPemFromFiles(files, parsed);
   const csr = parseCsr(pem);
-
-  const fp1 = sha1Hex(Buffer.from(pem, "utf8"));
-  const fp256 = sha256Hex(Buffer.from(pem, "utf8"));
-
-  const subjectString = dnToString(csr.subject);
-  const subject = dnToObject(csr.subject);
-
-  const publicKey = publicKeyInfoFromCsr(csr);
-
-  let signatureValid = false;
-  try {
-    signatureValid = typeof csr.verify === "function" ? !!csr.verify() : false;
-  } catch {
-    signatureValid = false;
-  }
-
-  const sigOid = (csr as any).signatureOid as string | undefined;
-  const sigAlgName = oidToName(sigOid);
-
+  const sigOid = csr.signatureOid;
   const exts = getExtensionRequest(csr);
+  const oids = getOidMap();
 
-  const sanExt = exts.find((e: any) => e?.name === "subjectAltName" || e?.id === (forge.pki as any).oids?.subjectAltName);
-  const keyUsageExt = exts.find((e: any) => e?.name === "keyUsage" || e?.id === (forge.pki as any).oids?.keyUsage);
-  const ekuExt = exts.find((e: any) => e?.name === "extKeyUsage" || e?.id === (forge.pki as any).oids?.extKeyUsage);
-  const bcExt = exts.find((e: any) => e?.name === "basicConstraints" || e?.id === (forge.pki as any).oids?.basicConstraints);
+  const sanExt = exts.find((ext) => ext.name === "subjectAltName" || ext.id === oids.subjectAltName);
+  const keyUsageExt = exts.find((ext) => ext.name === "keyUsage" || ext.id === oids.keyUsage);
+  const ekuExt = exts.find((ext) => ext.name === "extKeyUsage" || ext.id === oids.extKeyUsage);
+  const bcExt = exts.find((ext) => ext.name === "basicConstraints" || ext.id === oids.basicConstraints);
 
-  // subjectAltName SEMPRE arrays
-  const sanParsed = sanExt ? parseSAN(sanExt) : {};
-  const subjectAltName = {
-    dns: sanParsed.dns ?? [],
-    ip: sanParsed.ip ?? [],
-    email: sanParsed.email ?? [],
-    uri: sanParsed.uri ?? []
-  };
-
-  const keyUsage = keyUsageExt ? parseKeyUsage(keyUsageExt) : [];
-  const extendedKeyUsage = ekuExt ? parseExtKeyUsage(ekuExt) : [];
-  const basicConstraints = bcExt ? parseBasicConstraints(bcExt) : {};
-
-  const extensions = {
-    subjectAltName,
-    keyUsage,
-    extendedKeyUsage,
-    basicConstraints,
-    ...(exts.length ? { raw: exts } : {})
-  };
-
-  const warnings: Warning[] = [];
+  const subjectAltName = sanExt ? parseSan(sanExt) : { dns: [], ip: [], email: [], uri: [] };
+  const warnings: WarningItem[] = [];
 
   if (sigOid && WEAK_SIG_OIDS.has(sigOid)) {
     warnings.push({
       code: "WEAK_SIGNATURE_ALG",
-      message: "CSR assinado com SHA1 (sha1WithRSAEncryption). Recomenda-se gerar CSR com SHA256."
+      message: "Esse CSR foi assinado com SHA1. Recomendamos gerar um novo CSR com SHA256."
     });
   }
 
-  const sanHasAny =
-    subjectAltName.dns.length +
-      subjectAltName.ip.length +
-      subjectAltName.email.length +
-      subjectAltName.uri.length >
-    0;
-
-  if (!sanHasAny) {
+  if (subjectAltName.dns.length + subjectAltName.ip.length + subjectAltName.email.length + subjectAltName.uri.length === 0) {
     warnings.push({
       code: "NO_SAN",
-      message: "CSR nao contem Subject Alternative Name (SAN). Muitos emissores exigem SAN (ex.: DNS)."
+      message: "Esse CSR nao contem SAN. Muitos emissores exigem esse campo."
     });
   }
+
+  let signatureValid = false;
+  try {
+    signatureValid = typeof csr.verify === "function" ? Boolean(csr.verify()) : false;
+  } catch {
+    signatureValid = false;
+  }
+
+  const signatureAlgorithm = oidToName(sigOid);
+  const signature = {
+    valid: signatureValid,
+    ...(signatureAlgorithm ? { algorithm: signatureAlgorithm } : {}),
+    ...(sigOid ? { oid: sigOid } : {})
+  };
 
   return {
     inputId,
     type: "csr",
-    subjectString,
-    subject,
-    publicKey,
-    signature: {
-      valid: signatureValid,
-      ...(sigAlgName ? { algorithm: sigAlgName } : {}),
-      ...(sigOid ? { oid: sigOid } : {})
+    subjectString: dnToString(csr.subject),
+    subject: dnToObject(csr.subject),
+    publicKey: publicKeyInfoFromCsr(csr),
+    signature,
+    extensions: {
+      subjectAltName,
+      keyUsage: parseKeyUsage(keyUsageExt),
+      extendedKeyUsage: parseExtKeyUsage(ekuExt),
+      basicConstraints: parseBasicConstraints(bcExt),
+      ...(exts.length ? { raw: exts } : {})
     },
-    extensions,
     fingerprints: {
-      sha1: fp1,
-      sha256: fp256
+      sha1: sha1Hex(Buffer.from(pem, "utf8")),
+      sha256: sha256Hex(Buffer.from(pem, "utf8"))
     },
     warnings
   };

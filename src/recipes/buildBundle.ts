@@ -1,31 +1,36 @@
-import type { InputFile, ParsedObject, Artifact } from "../domain/types.js";
-import { sha256Hex, randomId } from "../utils/crypto.js";
+import type { Artifact, InputFile, ParsedObject } from "../domain/types.js";
+import {
+  certificateArtifactBaseName,
+  createArtifact,
+  extractMaterialsFromPkcs12,
+  resolveServerCertificateChain,
+  resolveServerCertificateChainFromPems
+} from "../crypto/materials.js";
+import { ToolkitException } from "../utils/errors.js";
 
-export function recipeBuildBundle(files: InputFile[], parsed: ParsedObject[]): Artifact {
-  const certInputIds = parsed
-    .filter((p) => p.detectedType === "x509_certificate" && p.encoding === "pem")
-    .map((p) => p.inputId);
-
-  const pemBlocks: string[] = [];
-
-  for (const id of certInputIds) {
-    const f = files.find((x) => x.id === id);
-    if (!f) continue;
-
-    const text = f.bytes.toString("utf8");
-    const blocks = text.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g) ?? [];
-    pemBlocks.push(...blocks);
+export function recipeBuildBundle(
+  files: InputFile[],
+  parsed: ParsedObject[],
+  params?: { sourcePassword?: string }
+): Artifact[] {
+  let chain = resolveServerCertificateChain(files, parsed);
+  if (!chain) {
+    const materials = extractMaterialsFromPkcs12(files, parsed, params?.sourcePassword);
+    if (!materials) {
+      throw new ToolkitException(
+        "SERVER_CERT_REQUIRED",
+        "Envie o certificado do servidor e os intermediarios para gerar o fullchain.",
+        400
+      );
+    }
+    chain = resolveServerCertificateChainFromPems(materials.certPems);
   }
 
-  const bundle = pemBlocks.join("\n") + "\n";
-  const bytes = Buffer.from(bundle, "utf8");
-
-  return {
-    id: randomId("artifact"),
-    filename: "chain.pem",
-    mimeType: "application/x-pem-file",
-    size: bytes.length,
-    sha256: sha256Hex(bytes),
-    bytes
-  };
+  const chainPem = `${chain.intermediateCertPems.join("\n")}\n`;
+  const bundle = `${[chain.leafCertPem, ...chain.intermediateCertPems].join("\n")}\n`;
+  const artifactBaseName = certificateArtifactBaseName(files, parsed);
+  return [
+    createArtifact(`${artifactBaseName}-chain.pem`, "application/x-pem-file", Buffer.from(chainPem, "utf8")),
+    createArtifact(`${artifactBaseName}-fullchain.pem`, "application/x-pem-file", Buffer.from(bundle, "utf8"))
+  ];
 }

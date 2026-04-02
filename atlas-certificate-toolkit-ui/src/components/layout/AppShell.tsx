@@ -11,7 +11,7 @@ export function AppShell({ children }: Props) {
         <div className="topbarInner">
           <div className="brandBlock">
             <div className="brandMark">X.DIGITAL BRASIL</div>
-            <div className="brandMeta">ICP-Brasil • SSL/TLS • Certificados corporativos</div>
+            <div className="brandMeta">ICP-Brasil | SSL/TLS | Certificados corporativos</div>
           </div>
         </div>
       </header>

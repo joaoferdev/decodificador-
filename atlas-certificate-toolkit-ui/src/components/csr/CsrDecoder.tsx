@@ -30,7 +30,7 @@ export function CsrDecoder() {
       setWarnings(res.warnings ?? []);
       setRaw(res as JsonValue);
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "Erro ao decodificar");
+      setErr(e instanceof Error ? e.message : "Nao foi possivel decodificar o CSR.");
     } finally {
       setLoading(false);
     }
@@ -46,7 +46,7 @@ export function CsrDecoder() {
       setRaw(res as JsonValue);
       setPem("");
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "Erro ao decodificar");
+      setErr(e instanceof Error ? e.message : "Nao foi possivel decodificar o CSR.");
     } finally {
       setLoading(false);
     }
@@ -82,7 +82,7 @@ export function CsrDecoder() {
           <div className="csrLabelRow">
             <div>
               <div className="csrLabel">Colar CSR (PEM)</div>
-              <div className="csrLabelHint">Dica: inclua BEGIN/END</div>
+              <div className="csrLabelHint">Inclua BEGIN/END.</div>
             </div>
 
             <span className="csrPill">Cole o PEM</span>
@@ -123,7 +123,7 @@ export function CsrDecoder() {
         <div className="csrSubHeader">
           <div>
             <div className="csrLabel">Ou faca upload do csr.pem</div>
-            <div className="csrHint">Arraste e solte ou selecione o arquivo.</div>
+            <div className="csrHint">Tipos aceitos: .pem, .csr e .txt.</div>
           </div>
         </div>
 
@@ -139,7 +139,7 @@ export function CsrDecoder() {
 
       <div className="panel csrResult">
         <div className="csrTitle">Resultado</div>
-        <div className="csrHint">Detalhes do CSR decodificado.</div>
+        <div className="csrHint">Resultado da decodificacao.</div>
 
         <div className="csrResultBody">
           {!decoded ? (
@@ -154,7 +154,7 @@ export function CsrDecoder() {
               <div className="divider" />
 
               <details className="csrAccordion">
-                <summary>Raw JSON (debug/integracao)</summary>
+                <summary>Ver JSON completo</summary>
                 <div style={{ marginTop: 10 }}>
                   <JsonViewer value={raw} />
                 </div>

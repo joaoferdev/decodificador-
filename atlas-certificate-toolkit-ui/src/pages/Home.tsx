@@ -13,11 +13,10 @@ export function Home() {
       <section className="workspaceShell" id="status">
         <div className="workspaceHeader">
           <div className="workspaceLead">
-            <div className="workspaceEyebrow">Painel Atlas</div>
-            <h2 className="workspaceTitle">Operacoes de certificados em um painel unico</h2>
+            <div className="workspaceEyebrow">Toolkit Publico</div>
+            <h2 className="workspaceTitle">CSR Decoder e conversao de certificados</h2>
             <p className="workspaceText">
-              Decodificacao de CSR e conversao de arquivos em um painel unico, pronto para
-              incorporacao.
+              Use o decoder para consultar um CSR ou envie arquivos para converter e baixar o resultado.
             </p>
           </div>
 
@@ -28,7 +27,7 @@ export function Home() {
             </div>
             <div className="workspaceBadge accent">
               <strong>{jobId ? "1" : "0"}</strong>
-              <span>Job ativo</span>
+              <span>Processamento ativo</span>
             </div>
           </div>
         </div>
@@ -52,7 +51,7 @@ export function Home() {
               {jobId ? (
                 <JobRecipes jobId={jobId} onReset={() => setJobId(null)} />
               ) : (
-                <div className="card workspaceEmpty">Faca upload dos arquivos para comecar.</div>
+                <div className="card workspaceEmpty">Envie os arquivos para comecar.</div>
               )}
             </div>
           </div>

@@ -35,11 +35,44 @@ export type ParsedObject = {
   fingerprintSha256?: string;
   publicKeyBits?: number;
   publicKeyType?: "RSA" | "EC" | "UNKNOWN";
+  isCertificateAuthority?: boolean;
+  isSelfSigned?: boolean;
 };
 
 export type WarningItem = {
   code: string;
   message: string;
+};
+
+export type ResolvedCertificateSelection = {
+  certPem: string;
+  allCertPems: string[];
+};
+
+export type ResolvedCertificateKeyPair = {
+  certPem: string;
+  keyPem: string;
+  allCertPems: string[];
+};
+
+export type ResolvedServerCertificateChain = {
+  leafCertPem: string;
+  intermediateCertPems: string[];
+  rootCertPems: string[];
+  allCertPems: string[];
+};
+
+export type CertificateRoleInfo = {
+  pem: string;
+  isCertificateAuthority: boolean;
+  isSelfSigned: boolean;
+  subjectId: string;
+  issuerId: string;
+};
+
+export type Pkcs12ExtractedMaterials = {
+  certPems: string[];
+  keyPem: string | null;
 };
 
 export type DecodedCsrAnalysis = {
@@ -68,6 +101,7 @@ export type JobAnalysis = {
 export type Job = {
   id: string;
   createdAt: string;
+  expiresAt: string;
   status: "created" | "parsed" | "expired";
   inputs: Omit<InputFile, "bytes">[];
   parsed: ParsedObject[];
@@ -86,6 +120,7 @@ export type Artifact = {
 export type JobPublic = {
   id: string;
   createdAt: string;
+  expiresAt: string;
   status: "created" | "parsed" | "expired";
   inputs: Omit<InputFile, "bytes">[];
   parsed: ParsedObject[];

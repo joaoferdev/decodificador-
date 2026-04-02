@@ -1,4 +1,4 @@
-import { apiFetch } from "./client";
+import { apiDownload, apiFetch } from "./client";
 
 export type Warning = { code: string; message: string };
 export type JsonValue =
@@ -35,7 +35,7 @@ export async function decodeCsrFromPem(pem: string) {
   return apiFetch<{ decoded: DecodedCsr; warnings: Warning[] }>("/toolkit/csr/decode", {
     method: "POST",
     headers: { "Content-Type": "application/json; charset=utf-8" },
-    body: JSON.stringify({ pem }),
+    body: JSON.stringify({ pem })
   });
 }
 
@@ -44,7 +44,7 @@ export async function decodeCsrFromFile(file: File) {
   fd.append("files", file);
   return apiFetch<{ decoded: DecodedCsr; warnings: Warning[] }>("/toolkit/csr/decode", {
     method: "POST",
-    body: fd,
+    body: fd
   });
 }
 
@@ -63,11 +63,14 @@ export type ParsedItem = {
   sans?: string[];
   fingerprintSha1?: string;
   fingerprintSha256?: string;
+  isCertificateAuthority?: boolean;
+  isSelfSigned?: boolean;
 };
 
 export type JobPublic = {
   id: string;
   createdAt: string;
+  expiresAt: string;
   status: string;
   inputs: { id: string; originalName: string; size: number; sha256: string; mimeType: string }[];
   parsed?: ParsedItem[];
@@ -84,7 +87,7 @@ export type RunRecipeResponse = {
 
 export async function createJob(files: File[]) {
   const fd = new FormData();
-  for (const f of files) fd.append("files", f);
+  for (const file of files) fd.append("files", file);
   return apiFetch<JobCreated>("/toolkit/jobs", { method: "POST", body: fd });
 }
 
@@ -96,12 +99,18 @@ export async function runRecipe(jobId: string, recipe: string, body?: Record<str
   return apiFetch<RunRecipeResponse>(`/toolkit/jobs/${jobId}/recipes/${recipe}`, {
     method: "POST",
     headers: { "Content-Type": "application/json; charset=utf-8" },
-    body: JSON.stringify(body ?? {}),
+    body: JSON.stringify(body ?? {})
   });
 }
 
-export function downloadArtifact(jobId: string, artifactId: string) {
-  const base = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
-  const url = `${base}/toolkit/jobs/${jobId}/download/${artifactId}`;
-  window.open(url, "_blank", "noopener,noreferrer");
+export async function downloadArtifact(jobId: string, artifactId: string, filename: string) {
+  const blob = await apiDownload(`/toolkit/jobs/${jobId}/download/${artifactId}`);
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }

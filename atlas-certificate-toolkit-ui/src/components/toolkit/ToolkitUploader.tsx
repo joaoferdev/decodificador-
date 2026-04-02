@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { createJob } from "../../api/toolkit";
 import { FileDrop } from "../common/FileDrop";
 import { Alert } from "../common/Alert";
@@ -14,12 +14,12 @@ export function ToolkitUploader(props: { onJobCreated: (jobId: string) => void }
   const [queuedFiles, setQueuedFiles] = useState<File[]>([]);
 
   const canSubmit = queuedFiles.length > 0 && !loading;
-
-  const queuedLabel = useMemo(() => {
-    if (!queuedFiles.length) return "Adicione os arquivos e envie quando terminar.";
-    if (queuedFiles.length === 1) return "1 arquivo pronto para criar o job.";
-    return `${queuedFiles.length} arquivos prontos para criar o job.`;
-  }, [queuedFiles]);
+  const queuedLabel =
+    queuedFiles.length === 0
+      ? "Adicione os arquivos e envie quando terminar."
+      : queuedFiles.length === 1
+        ? "1 arquivo pronto para analisar."
+        : `${queuedFiles.length} arquivos prontos para analisar.`;
 
   function addFiles(files: File[]) {
     setErr(null);
@@ -52,7 +52,7 @@ export function ToolkitUploader(props: { onJobCreated: (jobId: string) => void }
   }
 
   async function submitJob() {
-    if (!queuedFiles.length) return;
+    if (queuedFiles.length === 0) return;
 
     setErr(null);
     setLoading(true);
@@ -60,8 +60,8 @@ export function ToolkitUploader(props: { onJobCreated: (jobId: string) => void }
       const res = await createJob(queuedFiles);
       setQueuedFiles([]);
       props.onJobCreated(res.jobId);
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "Erro ao criar job");
+    } catch (error: unknown) {
+      setErr(error instanceof Error ? error.message : "Nao foi possivel enviar os arquivos.");
     } finally {
       setLoading(false);
     }
@@ -69,8 +69,8 @@ export function ToolkitUploader(props: { onJobCreated: (jobId: string) => void }
 
   return (
     <div className="card">
-      <strong>Uploads (Jobs)</strong>
-      <div className="small">Envie cert/key/chain/pfx e rode as recipes</div>
+      <strong>Enviar arquivos</strong>
+      <div className="small">Tipos aceitos: .pem, .crt, .cer, .key, .pfx, .p12, .csr e .txt.</div>
 
       {err ? (
         <div style={{ marginTop: 10 }}>
@@ -80,9 +80,9 @@ export function ToolkitUploader(props: { onJobCreated: (jobId: string) => void }
 
       <div style={{ marginTop: 12 }}>
         <FileDrop
-          label="Adicionar arquivos ao job"
+          label="Selecionar arquivos"
           multiple
-          accept=".pem,.crt,.cer,.key,.pfx,.p12,.txt"
+          accept=".pem,.crt,.cer,.key,.pfx,.p12,.csr,.txt"
           onFiles={addFiles}
         />
       </div>
@@ -91,7 +91,7 @@ export function ToolkitUploader(props: { onJobCreated: (jobId: string) => void }
         <div className="small">{queuedLabel}</div>
       </div>
 
-      {queuedFiles.length ? (
+      {queuedFiles.length > 0 ? (
         <div className="list" style={{ marginTop: 10 }}>
           {queuedFiles.map((file) => (
             <div
@@ -114,11 +114,11 @@ export function ToolkitUploader(props: { onJobCreated: (jobId: string) => void }
 
       <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
         <button className="btn primary" disabled={!canSubmit} onClick={submitJob} type="button">
-          {loading ? "Criando job..." : "Criar job com os arquivos"}
+          {loading ? "Enviando..." : "Analisar arquivos"}
         </button>
         <button
           className="btn"
-          disabled={!queuedFiles.length || loading}
+          disabled={queuedFiles.length === 0 || loading}
           onClick={() => setQueuedFiles([])}
           type="button"
         >
@@ -127,9 +127,7 @@ export function ToolkitUploader(props: { onJobCreated: (jobId: string) => void }
       </div>
 
       <div className="small" style={{ marginTop: 10 }}>
-        {loading
-          ? "Criando job..."
-          : "Dica: voce pode adicionar certificado e chave em selecoes separadas antes de criar o job."}
+        {loading ? "Enviando arquivos..." : "Os arquivos enviados sao temporarios."}
       </div>
     </div>
   );

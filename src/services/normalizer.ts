@@ -1,229 +1,228 @@
-import forge from "../vendor/forge.js";
-import type * as ForgeTypes from "node-forge";
-
 import type { InputFile, ParsedObject } from "../domain/types.js";
+import {
+  type CertificateLike,
+  type CsrLike,
+  asn1FromDer,
+  certificateFromAsn1,
+  certificateToPem,
+  certificateFromPem,
+  certificationRequestFromPem,
+  privateKeyFromPem
+} from "../crypto/forgeAdapter.js";
+import { detectPkcs12 } from "../crypto/materials.js";
 import { detectEncoding, detectType } from "./detector.js";
 import { splitPemBlocks } from "../utils/pem.js";
 import { sha1Hex, sha256Hex } from "./fingerprints.js";
 
-function dnToString(dn: any): string {
+function dnToString(dn: { attributes?: Array<{ shortName?: string; name?: string; value?: unknown }> }): string {
   try {
-    return dn.attributes.map((a: any) => `${a.shortName || a.name}=${a.value}`).join(", ");
+    return (dn.attributes ?? [])
+      .map((attribute) => `${attribute.shortName || attribute.name}=${String(attribute.value ?? "")}`)
+      .join(", ");
   } catch {
     return "";
   }
 }
 
-function extractSansFromCert(cert: ForgeTypes.pki.Certificate): string[] {
-  const ext = (cert as any).extensions?.find((e: any) => e.name === "subjectAltName");
+function extractSansFromCert(cert: CertificateLike): string[] {
+  const ext = cert.extensions?.find((item) => item.name === "subjectAltName");
   const altNames = ext?.altNames ?? [];
   return altNames
-    .filter((a: any) => a.type === 2 && typeof a.value === "string")
-    .map((a: any) => a.value);
+    .filter((item) => item.type === 2 && typeof item.value === "string")
+    .map((item) => String(item.value));
 }
 
-function extractEkuFromCert(cert: ForgeTypes.pki.Certificate): string[] {
-  const eku = (cert as any).extensions?.find((e: any) => e.name === "extKeyUsage");
+function extractEkuFromCert(cert: CertificateLike): string[] {
+  const eku = cert.extensions?.find((item) => item.name === "extKeyUsage");
   if (!eku) return [];
-  return Object.keys(eku).filter((k) => (eku as any)[k] === true);
+  return Object.keys(eku).filter((key) => eku[key] === true);
 }
 
-function publicKeyInfo(cert: ForgeTypes.pki.Certificate): {
-  publicKeyType: "RSA" | "EC" | "UNKNOWN";
-  publicKeyBits?: number;
+function certificateAuthorityInfo(cert: CertificateLike): {
+  isCertificateAuthority: boolean;
+  isSelfSigned: boolean;
 } {
-  const pk: any = (cert as any).publicKey;
+  const basicConstraints = cert.extensions?.find((item) => item.name === "basicConstraints");
+  const subject = dnToString(cert.subject);
+  const issuer = dnToString(cert.issuer);
 
-  if (pk?.n?.bitLength) {
-    return { publicKeyType: "RSA", publicKeyBits: pk.n.bitLength() };
+  return {
+    isCertificateAuthority: basicConstraints?.cA === true,
+    isSelfSigned: Boolean(subject) && subject === issuer
+  };
+}
+
+function publicKeyInfo(cert: CertificateLike): { publicKeyType: "RSA" | "EC" | "UNKNOWN"; publicKeyBits?: number } {
+  const publicKey = cert.publicKey;
+
+  if (publicKey?.n?.bitLength) {
+    return { publicKeyType: "RSA", publicKeyBits: publicKey.n.bitLength() };
   }
 
-  if (pk?.type === "ec" || pk?.curve || pk?.ecdsa) {
+  if (publicKey?.type === "ec" || publicKey?.curve || publicKey?.ecdsa) {
     return { publicKeyType: "EC" };
   }
 
   return { publicKeyType: "UNKNOWN" };
 }
 
-function tryParseCertificate(pem: string): ForgeTypes.pki.Certificate | null {
+function tryParseCertificate(pem: string): CertificateLike | null {
   try {
-    // forge runtime vem do vendor/forge.js
-    return (forge.pki as any).certificateFromPem(pem);
+    return certificateFromPem(pem);
   } catch {
     return null;
   }
 }
 
-function tryParseCsr(pem: string): any | null {
+function tryParseCsr(pem: string): CsrLike | null {
   try {
-    return (forge.pki as any).certificationRequestFromPem(pem);
+    return certificationRequestFromPem(pem);
   } catch {
     return null;
   }
 }
 
-function tryParsePrivateKey(pem: string): { encrypted: boolean; key: any | null } | null {
+function tryParsePrivateKey(pem: string): { encrypted: boolean; key: ReturnType<typeof privateKeyFromPem> | null } | null {
   try {
-    const key = (forge.pki as any).privateKeyFromPem(pem);
-    return { encrypted: false, key };
+    return { encrypted: false, key: privateKeyFromPem(pem) };
   } catch {
-    const isEnc = /ENCRYPTED PRIVATE KEY|Proc-Type:\s*4,ENCRYPTED/i.test(pem);
-    if (isEnc) return { encrypted: true, key: null };
+    const encrypted = /ENCRYPTED PRIVATE KEY|Proc-Type:\s*4,ENCRYPTED/i.test(pem);
+    return encrypted ? { encrypted: true, key: null } : null;
+  }
+}
+
+function tryParseDerCertificate(bytes: Buffer): { cert: CertificateLike; pem: string } | null {
+  try {
+    const cert = certificateFromAsn1(asn1FromDer(bytes));
+    return {
+      cert,
+      pem: certificateToPem(cert)
+    };
+  } catch {
     return null;
   }
+}
+
+function pushCertificate(
+  output: ParsedObject[],
+  file: InputFile,
+  pem: string,
+  cert: CertificateLike,
+  encoding: "pem" | "der" = "pem"
+) {
+  const publicKey = publicKeyInfo(cert);
+  const authorityInfo = certificateAuthorityInfo(cert);
+  output.push({
+    inputId: file.id,
+    detectedType: "x509_certificate",
+    encoding,
+    subject: dnToString(cert.subject),
+    issuer: dnToString(cert.issuer),
+    sans: extractSansFromCert(cert),
+    eku: extractEkuFromCert(cert),
+    fingerprintSha1: sha1Hex(Buffer.from(pem, "utf8")),
+    fingerprintSha256: sha256Hex(Buffer.from(pem, "utf8")),
+    publicKeyType: publicKey.publicKeyType,
+    ...(cert.serialNumber ? { serialHex: cert.serialNumber } : {}),
+    ...(cert.validity?.notBefore ? { notBefore: cert.validity.notBefore.toISOString() } : {}),
+    ...(cert.validity?.notAfter ? { notAfter: cert.validity.notAfter.toISOString() } : {}),
+    ...(publicKey.publicKeyBits !== undefined ? { publicKeyBits: publicKey.publicKeyBits } : {}),
+    ...(authorityInfo.isCertificateAuthority ? { isCertificateAuthority: true } : {}),
+    ...(authorityInfo.isSelfSigned ? { isSelfSigned: true } : {})
+  });
+}
+
+function pushCsr(output: ParsedObject[], file: InputFile, pem: string, csr: CsrLike) {
+  const sans: string[] = [];
+
+  try {
+    const attr = csr.getAttribute?.({ name: "extensionRequest" });
+    const extensions = attr?.extensions ?? [];
+    const sanExt = extensions.find((item) => item.name === "subjectAltName");
+    const altNames = sanExt?.altNames ?? [];
+    for (const item of altNames) {
+      if (item.type === 2 && typeof item.value === "string") {
+        sans.push(item.value);
+      }
+    }
+  } catch {
+    // no-op
+  }
+
+  output.push({
+    inputId: file.id,
+    detectedType: "csr",
+    encoding: "pem",
+    subject: dnToString(csr.subject),
+    sans,
+    fingerprintSha1: sha1Hex(Buffer.from(pem, "utf8")),
+    fingerprintSha256: sha256Hex(Buffer.from(pem, "utf8"))
+  });
+}
+
+function pushKey(
+  output: ParsedObject[],
+  file: InputFile,
+  pem: string,
+  key: { encrypted: boolean; key: ReturnType<typeof privateKeyFromPem> | null }
+) {
+  output.push({
+    inputId: file.id,
+    detectedType: "private_key",
+    encoding: "pem",
+    encrypted: key.encrypted,
+    keyType: key.key?.n ? "RSA" : key.key?.type === "ec" ? "EC" : "UNKNOWN",
+    fingerprintSha1: sha1Hex(Buffer.from(pem, "utf8")),
+    fingerprintSha256: sha256Hex(Buffer.from(pem, "utf8")),
+    ...(key.key?.n?.bitLength ? { keyBits: key.key.n.bitLength() } : {})
+  });
 }
 
 export function normalizeInputs(files: InputFile[]): ParsedObject[] {
-  const out: ParsedObject[] = [];
+  const output: ParsedObject[] = [];
 
-  for (const f of files) {
-    const encoding = detectEncoding(f.bytes);
+  for (const file of files) {
+    const encoding = detectEncoding(file.bytes);
 
     if (encoding === "pem") {
-      const text = f.bytes.toString("utf8");
+      const text = file.bytes.toString("utf8");
       const blocks = splitPemBlocks(text);
-
-      const hinted = detectType(f.bytes, encoding);
+      const hintedType = detectType(file.bytes, encoding);
 
       if (blocks.length === 0) {
-        out.push({
-          inputId: f.id,
-          detectedType: hinted,
+        output.push({
+          inputId: file.id,
+          detectedType: hintedType,
           encoding: "pem",
-          note: "PEM sem blocos BEGIN/END reconhecíveis"
+          note: "PEM sem blocos BEGIN/END reconheciveis"
         });
         continue;
       }
 
       for (const pem of blocks) {
-        const fp1 = sha1Hex(Buffer.from(pem, "utf8"));
-        const fp256 = sha256Hex(Buffer.from(pem, "utf8"));
-
-        // 1) CERT (pelo header)
-        if (/BEGIN (X509 )?CERTIFICATE/i.test(pem)) {
-          const cert = tryParseCertificate(pem);
-          if (cert) {
-            const pk = publicKeyInfo(cert);
-            out.push({
-              inputId: f.id,
-              detectedType: "x509_certificate",
-              encoding: "pem",
-              subject: dnToString((cert as any).subject),
-              issuer: dnToString((cert as any).issuer),
-              serialHex: (cert as any).serialNumber,
-              notBefore: (cert as any).validity?.notBefore?.toISOString(),
-              notAfter: (cert as any).validity?.notAfter?.toISOString(),
-              sans: extractSansFromCert(cert),
-              eku: extractEkuFromCert(cert),
-              fingerprintSha1: fp1,
-              fingerprintSha256: fp256,
-              publicKeyType: pk.publicKeyType,
-              ...(pk.publicKeyBits !== undefined ? { publicKeyBits: pk.publicKeyBits } : {})
-            });
-            continue;
-          }
-        }
-
-        // 2) CSR (pelo header)
-        if (/BEGIN (NEW )?CERTIFICATE REQUEST/i.test(pem)) {
-          const csr = tryParseCsr(pem);
-          if (csr) {
-            const sans: string[] = [];
-            try {
-              const attr = csr.getAttribute?.({ name: "extensionRequest" });
-              const exts = attr?.extensions ?? [];
-              const sanExt = exts.find((e: any) => e.name === "subjectAltName");
-              const altNames = sanExt?.altNames ?? [];
-              for (const a of altNames) if (a.type === 2 && typeof a.value === "string") sans.push(a.value);
-            } catch {}
-
-            out.push({
-              inputId: f.id,
-              detectedType: "csr",
-              encoding: "pem",
-              subject: dnToString(csr.subject),
-              sans,
-              fingerprintSha1: fp1,
-              fingerprintSha256: fp256
-            });
-            continue;
-          }
-        }
-
-        // 3) PRIVATE KEY (pelo header)
-        if (/BEGIN (EC |RSA )?PRIVATE KEY/i.test(pem) || /BEGIN ENCRYPTED PRIVATE KEY/i.test(pem)) {
-          const key = tryParsePrivateKey(pem);
-          if (key) {
-            out.push({
-              inputId: f.id,
-              detectedType: "private_key",
-              encoding: "pem",
-              encrypted: key.encrypted,
-              keyType: key.key?.n ? "RSA" : "UNKNOWN",
-              keyBits: key.key?.n?.bitLength?.() ?? undefined,
-              fingerprintSha1: fp1,
-              fingerprintSha256: fp256
-            });
-            continue;
-          }
-        }
-
-        // 4) fallback geral
         const cert = tryParseCertificate(pem);
         if (cert) {
-          const pk = publicKeyInfo(cert);
-          out.push({
-            inputId: f.id,
-            detectedType: "x509_certificate",
-            encoding: "pem",
-            subject: dnToString((cert as any).subject),
-            issuer: dnToString((cert as any).issuer),
-            serialHex: (cert as any).serialNumber,
-            notBefore: (cert as any).validity?.notBefore?.toISOString(),
-            notAfter: (cert as any).validity?.notAfter?.toISOString(),
-            sans: extractSansFromCert(cert),
-            eku: extractEkuFromCert(cert),
-            fingerprintSha1: fp1,
-            fingerprintSha256: fp256,
-            publicKeyType: pk.publicKeyType,
-            ...(pk.publicKeyBits !== undefined ? { publicKeyBits: pk.publicKeyBits } : {})
-          });
+          pushCertificate(output, file, pem, cert);
           continue;
         }
 
         const csr = tryParseCsr(pem);
         if (csr) {
-          out.push({
-            inputId: f.id,
-            detectedType: "csr",
-            encoding: "pem",
-            subject: dnToString(csr.subject),
-            fingerprintSha1: fp1,
-            fingerprintSha256: fp256
-          });
+          pushCsr(output, file, pem, csr);
           continue;
         }
 
         const key = tryParsePrivateKey(pem);
         if (key) {
-          out.push({
-            inputId: f.id,
-            detectedType: "private_key",
-            encoding: "pem",
-            encrypted: key.encrypted,
-            keyType: key.key?.n ? "RSA" : "UNKNOWN",
-            keyBits: key.key?.n?.bitLength?.() ?? undefined,
-            fingerprintSha1: fp1,
-            fingerprintSha256: fp256
-          });
+          pushKey(output, file, pem, key);
           continue;
         }
 
-        out.push({
-          inputId: f.id,
-          detectedType: hinted,
+        output.push({
+          inputId: file.id,
+          detectedType: hintedType,
           encoding: "pem",
-          note: "Bloco PEM não pôde ser interpretado pelo forge"
+          note: "Bloco PEM nao pode ser interpretado pelo forge"
         });
       }
 
@@ -231,27 +230,32 @@ export function normalizeInputs(files: InputFile[]): ParsedObject[] {
     }
 
     if (encoding === "der") {
-      const lowerName = f.originalName.toLowerCase();
-      const looksLikePkcs12 = lowerName.endsWith(".pfx") || lowerName.endsWith(".p12");
-
-      out.push({
-        inputId: f.id,
-        detectedType: looksLikePkcs12 ? "pkcs12" : "unknown",
+      const pkcs12 = detectPkcs12(file.bytes);
+      if (!pkcs12) {
+        const cert = tryParseDerCertificate(file.bytes);
+        if (cert) {
+          pushCertificate(output, file, cert.pem, cert.cert, "der");
+          continue;
+        }
+      }
+      output.push({
+        inputId: file.id,
+        detectedType: pkcs12 ? "pkcs12" : "unknown",
         encoding: "der",
-        note: looksLikePkcs12
-          ? "PKCS#12 binario identificado pela extensao do arquivo"
+        note: pkcs12
+          ? "PKCS#12 binario identificado por inspecao ASN.1"
           : "Arquivo DER binario sem tipo reconhecido"
       });
       continue;
     }
 
-    out.push({
-      inputId: f.id,
+    output.push({
+      inputId: file.id,
       detectedType: "unknown",
       encoding,
-      note: "Formato não identificado"
+      note: "Formato nao identificado"
     });
   }
 
-  return out;
+  return output;
 }

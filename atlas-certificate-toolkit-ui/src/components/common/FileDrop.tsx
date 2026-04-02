@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 
 export function FileDrop(props: {
   label: string;
@@ -7,6 +7,7 @@ export function FileDrop(props: {
   onFiles: (files: File[]) => void;
 }) {
   const ref = useRef<HTMLInputElement | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   return (
     <div className="card" style={{ padding: 16 }}>
@@ -15,7 +16,7 @@ export function FileDrop(props: {
           <strong style={{ display: "block", fontSize: 15 }}>{props.label}</strong>
           <div className="small">Arraste e solte ou selecione arquivo(s)</div>
         </div>
-        <button className="btn" onClick={() => ref.current?.click()}>
+        <button className="btn" onClick={() => ref.current?.click()} type="button">
           Selecionar
         </button>
       </div>
@@ -28,7 +29,7 @@ export function FileDrop(props: {
         style={{ display: "none" }}
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
-          if (files.length) props.onFiles(files);
+          if (files.length > 0) props.onFiles(files);
           e.currentTarget.value = "";
         }}
       />
@@ -41,18 +42,39 @@ export function FileDrop(props: {
           padding: 22,
           textAlign: "center",
           color: "rgba(235, 245, 255, 0.82)",
-          background:
-            "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)), linear-gradient(135deg, rgba(52,180,242,0.06), transparent 45%)",
+          background: isDragging
+            ? "linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03)), linear-gradient(135deg, rgba(52,180,242,0.16), transparent 45%)"
+            : "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)), linear-gradient(135deg, rgba(52,180,242,0.06), transparent 45%)"
         }}
-        onDragOver={(e) => e.preventDefault()}
+        onDragEnter={(e) => {
+          e.preventDefault();
+          setIsDragging(true);
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setIsDragging(true);
+        }}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          setIsDragging(false);
+        }}
         onDrop={(e) => {
           e.preventDefault();
+          setIsDragging(false);
           const files = Array.from(e.dataTransfer.files ?? []);
-          if (files.length) props.onFiles(files);
+          if (files.length > 0) props.onFiles(files);
         }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            ref.current?.click();
+          }
+        }}
+        role="button"
+        tabIndex={0}
       >
-        <div style={{ fontWeight: 700, marginBottom: 4 }}>Solte aqui</div>
-        <div className="small">Arquivos PEM, CRT, KEY, PFX ou CSR</div>
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>{isDragging ? "Solte para enviar" : "Solte aqui"}</div>
+        <div className="small">Arquivos PEM, CRT, CER, KEY, PFX, P12, CSR ou TXT</div>
       </div>
     </div>
   );
